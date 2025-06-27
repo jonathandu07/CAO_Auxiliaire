@@ -144,8 +144,44 @@ class PageParametres(tk.Frame):
 class PageMoteurStirling(tk.Frame):
     def __init__(self, parent, controller):
         super().__init__(parent, bg=COULEURS["fond"])
-        tk.Label(self, text="Moteur Stirling (à venir)", bg=COULEURS["fond"],
-                 fg=COULEURS["primaire"], font=("Segoe UI", 16)).pack(pady=30)
+
+        tk.Label(self, text="Conception du moteur Stirling", bg=COULEURS["fond"],
+                 fg=COULEURS["primaire"], font=("Segoe UI", 18, "bold")).pack(pady=20)
+
+        self.champs = {}
+        donnees = [
+            ("Diamètre du cylindre (mm)", "d_cyl"),
+            ("Course du piston (mm)", "course"),
+            ("Longueur de la bielle (mm)", "bielle"),
+            ("Volume chambre chaude (cm³)", "v_chaude"),
+            ("Volume chambre froide (cm³)", "v_froide"),
+            ("Température chaude (°C)", "t_chaude"),
+            ("Température froide (°C)", "t_froide"),
+            ("Fréquence de fonctionnement (Hz)", "freq"),
+            ("Pression moyenne (bar)", "pression"),
+        ]
+
+        for label, cle in donnees:
+            f = tk.Frame(self, bg=COULEURS["fond"])
+            tk.Label(f, text=label, font=("Segoe UI", 10), width=30, anchor="w",
+                     bg=COULEURS["fond"], fg=COULEURS["texte"]).pack(side="left")
+            entry = tk.Entry(f, width=15, font=("Segoe UI", 10))
+            entry.pack(side="right")
+            f.pack(pady=5)
+            self.champs[cle] = entry
+
+        # Choix du gaz
+        f_gaz = tk.Frame(self, bg=COULEURS["fond"])
+        tk.Label(f_gaz, text="Gaz utilisé", font=("Segoe UI", 10), width=30, anchor="w",
+                 bg=COULEURS["fond"], fg=COULEURS["texte"]).pack(side="left")
+        self.gaz_var = tk.StringVar()
+        self.gaz_var.set("Air")
+        menu = tk.OptionMenu(f_gaz, self.gaz_var, "Air", "Hélium", "Hydrogène", "Azote")
+        menu.config(bg=COULEURS["fond"], fg=COULEURS["texte"], font=("Segoe UI", 10), highlightthickness=0)
+        f_gaz.pack(pady=5)
+
+        bouton_flat(self, "Retour", lambda: controller.afficher_page(PageAccueil)).pack(pady=30)
+
 
 class PageDroneStructure(tk.Frame):
     def __init__(self, parent, controller):
