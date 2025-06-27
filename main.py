@@ -418,102 +418,90 @@ class PageMoteurStirling(tk.Frame):
             rendement_mec = getval("rendement_mec", float, 80) / 100
             rendement_stirling = getval("rendement_stirling", float, 35) / 100
 
-            # Constantes physiques du gaz
-            gaz_data = {
-                "Air": {"R": 287, "gamma": 1.4, "rho0": 1.29},
-                "Hélium": {"R": 2077, "gamma": 1.66, "rho0": 0.18},
-                "Hydrogène": {"R": 4124, "gamma": 1.41, "rho0": 0.09},
-                "Azote": {"R": 296, "gamma": 1.4, "rho0": 1.25},
-            }
-            gaz_phys = gaz_data.get(gaz, gaz_data["Air"])
-
-            # 2. Calculs thermodynamiques
+            # -- 1. Calcul thermodynamique --
             delta_T = T_hot - T_cold
             eta_carnot = delta_T / T_hot
             eta_total = eta_carnot * rendement_stirling
+
             if eta_total < 0.01:
                 raise ValueError("Différence de température trop faible pour calculer un moteur réaliste.")
 
-            # Puissance thermique nécessaire pour la puissance utile
             Qth_necessaire = W / (eta_total * rendement_mec * rendement_gen)
 
-            # Calcul du volume total balayé
-            P_Pa = P_bar * 1e5
-            energie_cycle = W / (1 * eta_total)  # cycle par seconde (1 Hz) utilisé pour base
-            V_tot_base = energie_cycle / (P_Pa * delta_T / T_hot)  # m³, à 1Hz pour estimation
-
-            # Géométrie (si d_cyl imposé ou non)
-            if d_cyl_user:
+            # -- 2. Géométrie réaliste (course typique 1.2x diamètre) --
+            ratio_course = 1.2
+            if d_cyl_user and d_cyl_user > 0:
                 d_cyl = d_cyl_user
-                A_cyl = np.pi * (d_cyl / 2) ** 2  # mm²
-                h_cyl_utile = (V_tot_base * 1e9) / A_cyl  # mm
             else:
-                d_cyl = (4 * V_tot_base * 1e9 / (np.pi * 1.5)) ** (1/3)  # mm
-                A_cyl = np.pi * (d_cyl / 2) ** 2
-                h_cyl_utile = (V_tot_base * 1e9) / A_cyl  # mm
+                # Estimation initiale si vide (pour éviter infini)
+                d_cyl = 70  # mm
+            course = ratio_course * d_cyl
+            A_cyl = np.pi * (d_cyl / 2) ** 2  # mm²
+            V_balayage = A_cyl * course * 1e-9  # m³
 
-            # Prise en compte de tous les éléments mécaniques
-            e_piston = max(0.22 * d_cyl, 10)
-            e_joint = 2.5
-            zone_morte = 0.08 * h_cyl_utile
-            jeu_fonctionnement = 0.018 * h_cyl_utile
-            h_cyl_total = (
-                h_cyl_utile + e_piston + nb_joints * e_joint + 2 * zone_morte + jeu_fonctionnement
-            )
-            course = h_cyl_utile / 2
-            vilebrequin = course / 2
-
-            # 3. Calcul de la fréquence/max rpm en fonction des dimensions et de la pression
-            # Vitesse moyenne piston typique : 2 à 4 m/s max (sinon usure)
-            V_piston_max = 2.5  # m/s recommandé pour durabilité
-            course_m = course / 1000  # mm → m
-            freq_max = V_piston_max / (2 * course_m) if course_m > 0 else 1
-            freq = min(30, freq_max)  # limite arbitraire à 30 Hz pour éviter la destruction
-
+            # -- 3. Fréquence de rotation (dépend vitesse piston max, 2.2m/s) --
+            V_piston_max = 2.2
+            freq_max = V_piston_max / (2 * course / 1000)
+            freq = min(freq_max, 8)  # 8 Hz max (typiquement de 1 à 8 Hz)
             rpm = freq * 60
 
-            # 4. Couple sur vilebrequin et puissance mécanique réelle
-            P_mec = W / (rendement_gen * rendement_mec)
-            couple = P_mec / (2 * np.pi * freq) if freq > 0 else 0
+            # -- 4. Volume balayé par cycle, puissance réellement possible
+            P_Pa = P_bar * 1e5
+            puissance_possible = (
+                P_Pa * V_balayage * delta_T / T_hot *
+                eta_total * freq * rendement_mec * rendement_gen
+            )
+            # On ne dépasse jamais la puissance cible
+            P_elec = min(W, puissance_possible)
 
-            # 5. Production électrique
-            P_elec = P_mec * rendement_gen * rendement_mec * eta_total
+            # -- 5. Couple, production annuelle
+            P_mec = P_elec / (rendement_gen * rendement_mec) if (rendement_gen * rendement_mec) > 0 else 0
+            couple = P_mec / (2 * np.pi * freq) if freq > 0 else 0
             production_annuelle = P_elec * 24 * 365 / 1000  # kWh/an
+
+            # -- 6. Dimensions annexes --
+            e_piston = max(0.20 * d_cyl, 10)
+            e_joint = 2.5
+            zone_morte = 0.08 * course
+            jeu_fonctionnement = 0.018 * course
+            h_cyl_utile = course
+            h_cyl_total = (
+                h_cyl_utile + e_piston + nb_joints * e_joint +
+                2 * zone_morte + jeu_fonctionnement
+            )
+            vilebrequin = course / 2
 
             materiau = self._materiau_recommande(T_hot_C)
             etat_surface = "Ra ≤ 0.4 µm"
             roulement = "Roulement à billes étanche, acier inox ou céramique"
 
-            # 6. Affichage synthétique
             self.resultat.config(text=f"""
-🔧 Résultats pour {W:.0f} W (gaz : {gaz}) :
-- Temp. chaude : {T_hot_C:.0f} °C | Temp. froide : {T_cold_C:.0f} °C | Pression : {P_bar:.1f} bar
-- Rendement Carnot : {eta_carnot*100:.1f} % | Rendement réel moteur : {rendement_stirling*100:.1f} %
-- Rendement mécanique : {rendement_mec*100:.1f} % | Génératrice : {rendement_gen*100:.1f} %
-- Puissance thermique à fournir : {Qth_necessaire:.1f} W
+🔧 Résultats réalistes pour {W:.0f} W (gaz : {gaz}) :
+Temp. chaude : {T_hot_C:.0f} °C | Temp. froide : {T_cold_C:.0f} °C | Pression : {P_bar:.1f} bar
+Rendement Carnot : {eta_carnot*100:.1f} % | Rendement réel moteur : {rendement_stirling*100:.1f} %
+Rendement mécanique : {rendement_mec*100:.1f} % | Génératrice : {rendement_gen*100:.1f} %
+Puissance thermique à fournir : {Qth_necessaire:.1f} W
 
 -- Géométrie --
-- Volume total balayé : {V_tot_base*1e6:.2f} cm³ (base 1 Hz)
-- Diamètre cylindre : {d_cyl:.2f} mm
-- Hauteur utile : {h_cyl_utile:.2f} mm | Hauteur totale : {h_cyl_total:.2f} mm
-- Course piston : {course:.2f} mm | Longueur vilebrequin : {vilebrequin:.2f} mm
+Volume total balayé : {V_balayage*1e6:.2f} cm³ (à {freq:.2f} Hz)
+Ø cylindre : {d_cyl:.2f} mm | Course piston : {course:.2f} mm (ratio : {ratio_course:.2f})
+Hauteur utile : {h_cyl_utile:.2f} mm | Hauteur totale : {h_cyl_total:.2f} mm
+Longueur vilebrequin : {vilebrequin:.2f} mm
 
 -- Dynamique --
-- Vitesse moyenne piston max : {V_piston_max:.2f} m/s
-- Fréquence max possible : {freq_max:.2f} Hz
-- Fréquence de calcul : {freq:.2f} Hz | Vitesse de rotation : {rpm:.0f} tr/min
-- Couple sur vilebrequin : {couple:.2f} Nm
+Vitesse piston max : {V_piston_max:.2f} m/s | Fréquence réelle : {freq:.2f} Hz
+Vitesse de rotation : {rpm:.0f} tr/min | Couple vilebrequin : {couple:.2f} Nm
 
--- Production électrique réelle --
-- Puissance électrique nette : {P_elec:.1f} W
-- Production annuelle 24/24 : {production_annuelle:.1f} kWh/an
+-- Production réelle --
+Puissance électrique nette : {P_elec:.1f} W
+Production annuelle continue : {production_annuelle:.1f} kWh/an
 
 🛠️ État de surface : {etat_surface}
 ⚙️ Type de roulement : {roulement}
 🧱 Matériau recommandé (cylindre) : {materiau}
 """)
 
-            # ---- Schéma technique
+            # Schéma technique à jour
             self.afficher_schema(d_cyl, h_cyl_utile, e_piston, nb_joints, e_joint,
                                 zone_morte, jeu_fonctionnement, h_cyl_total)
 
@@ -532,7 +520,6 @@ class PageMoteurStirling(tk.Frame):
         ax = fig.add_subplot(111)
         ax.set_title("Coupe longitudinale du cylindre", fontsize=12)
 
-        # Affichage stylisé du cylindre
         y = 0
         legend_handles = []
 
@@ -590,9 +577,6 @@ class PageMoteurStirling(tk.Frame):
         self.canvas = FigureCanvasTkAgg(fig, master=self.schema_zone)
         self.canvas.draw()
         self.canvas.get_tk_widget().pack(pady=10)
-
-
-
 
 
 
@@ -1292,7 +1276,168 @@ class PageVilebrequin(tk.Frame):
         self.canvas.get_tk_widget().pack(pady=5)
 
 
+class PageDimensionnementStirling(tk.Frame):
+    def __init__(self, parent, controller):
+        super().__init__(parent, bg=COULEURS["fond"])
+        self.controller = controller
 
+        # --------- FORMULAIRE ---------
+        left_col = tk.Frame(self, bg=COULEURS["fond"])
+        left_col.pack(side="left", fill="both", expand=True, padx=32, pady=18)
+
+        tk.Label(left_col, text="Dimensionnement moteur Stirling – Outil ultime",
+                 bg=COULEURS["fond"], fg=COULEURS["primaire"],
+                 font=("Segoe UI", 21, "bold")).pack(pady=(12, 10))
+
+        # Données d'entrée
+        self.champs = {}
+        donnees = [
+            ("Température chaude (°C)", "t_chaude", "650"),
+            ("Température froide (°C)", "t_froide", "40"),
+            ("Pression travail (bar)", "pression", "20"),
+            ("Diamètre cylindre (mm)", "d_cyl", ""),  # Laisse vide pour auto-calc
+            ("Course piston (mm)", "course", ""),
+            ("Fréquence (Hz)", "freq", ""),
+            ("Type de gaz", "gaz", "Air"),
+            ("Rendement moteur (%)", "rendement_moteur", "35"),
+            ("Rendement mécanique (%)", "rendement_mec", "80"),
+            ("Rendement génératrice (%)", "rendement_gen", "90"),
+            ("Nombre de cylindres", "nb_cyl", "1"),
+        ]
+        for i, (label, cle, default) in enumerate(donnees):
+            l = tk.Label(left_col, text=label, font=("Segoe UI", 11), width=26, anchor="w",
+                         bg=COULEURS["fond"], fg=COULEURS["texte"])
+            l.grid(row=i, column=0, sticky="w", padx=6, pady=5)
+            if cle == "gaz":
+                var = tk.StringVar(value=default)
+                menu = tk.OptionMenu(left_col, var, "Air", "Hélium", "Hydrogène", "Azote")
+                menu.config(bg=COULEURS["fond"], fg=COULEURS["texte"], font=("Segoe UI", 11), highlightthickness=0)
+                menu.grid(row=i, column=1, padx=6, pady=5)
+                self.champs[cle] = var
+            else:
+                entry = tk.Entry(left_col, width=13, font=("Segoe UI", 11))
+                if default:
+                    entry.insert(0, default)
+                entry.grid(row=i, column=1, padx=6, pady=5)
+                self.champs[cle] = entry
+
+        # Boutons
+        btns = tk.Frame(left_col, bg=COULEURS["fond"])
+        btns.grid(row=len(donnees), column=0, columnspan=2, pady=(10, 20))
+        bouton_flat(btns, "Calculer", self.calculer).pack(side="left", padx=14)
+        bouton_flat(btns, "Retour", lambda: controller.afficher_page(PageAccueil)).pack(side="left", padx=14)
+
+        # Résultats
+        self.resultat = tk.Label(left_col, text="", bg="#f4f7fb", fg=COULEURS["accent"],
+                                 font=("Consolas", 11), justify="left", anchor="w", width=64)
+        self.resultat.grid(row=len(donnees)+1, column=0, columnspan=2, sticky="w", padx=2, pady=(2, 8))
+
+    def calculer(self):
+        try:
+            def safe_float(key, default=None):
+                txt = self.champs[key].get().strip()
+                return float(txt) if txt else default
+
+            # 1. Entrées utilisateur
+            T_hot_C    = safe_float("t_chaude", 650)
+            T_cold_C   = safe_float("t_froide", 40)
+            T_hot      = T_hot_C + 273.15
+            T_cold     = T_cold_C + 273.15
+            P_bar      = safe_float("pression", 20)
+            d_cyl      = safe_float("d_cyl", None)
+            course     = safe_float("course", None)
+            freq       = safe_float("freq", None)
+            gaz        = self.champs["gaz"].get()
+            rendement_moteur = safe_float("rendement_moteur", 35) / 100
+            rendement_mec    = safe_float("rendement_mec", 80) / 100
+            rendement_gen    = safe_float("rendement_gen", 90) / 100
+            nb_cyl = int(self.champs["nb_cyl"].get() or 1)
+
+            eta_carnot = 1 - (T_cold / T_hot)
+            eta_reel   = eta_carnot * rendement_moteur * rendement_mec * rendement_gen
+
+            # AUTO-DIMENSIONNEMENT si d_cyl ou course ou freq manquant
+            d_cyl_auto = False
+            course_auto = False
+            freq_auto = False
+
+            # On cible une vitesse moyenne piston de 2,5 m/s max (classique pour Stirling robuste)
+            V_piston_max = 2.5  # m/s
+
+            # Si tout est manquant, cible 1000 W (pratique)
+            P_bar_val = P_bar if P_bar is not None else 20
+            W_cible = 1000
+
+            # 1. Si d_cyl ou course est manquant → on choisit d'abord course/d_cyl = 1,2 (ratio classique)
+            if d_cyl is None and course is None:
+                d_cyl = 70
+                d_cyl_auto = True
+                course = 1.2 * d_cyl
+                course_auto = True
+            elif d_cyl is None:
+                course = course
+                d_cyl = course / 1.2
+                d_cyl_auto = True
+            elif course is None:
+                d_cyl = d_cyl
+                course = 1.2 * d_cyl
+                course_auto = True
+
+            # 2. Calcul volume balayé V (m3)
+            V = np.pi * (d_cyl/2)**2 * course * 1e-9 * nb_cyl
+
+            # 3. Si fréquence manquante, déduire pour respecter V_piston_max
+            # Vitesse piston moyenne = 2 * course * freq (en m/s)
+            if freq is None:
+                freq = V_piston_max / (2 * (course / 1000)) if course > 0 else 5
+                freq_auto = True
+
+            rpm = freq * 60
+            P_Pa = P_bar_val * 1e5
+
+            # Puissance théorique simplifiée
+            P_th = P_Pa * V * freq * eta_carnot * rendement_moteur  # W
+
+            # Puissance nette électrique
+            P_elec = P_th * rendement_mec * rendement_gen
+
+            # Couple arbre (N.m)
+            P_mec = P_elec / rendement_gen if rendement_gen > 0 else 0
+            N = freq  # tr/s
+            couple = P_mec / (2 * np.pi * N) if N > 0 else 0
+
+            # Dimension arbre (acier, sécurité 60MPa)
+            tau_adm = 60e6  # Pa
+            d_arbre = ((16 * abs(couple)) / (np.pi * tau_adm)) ** (1/3) * 1000  # mm
+            l_arbre = 1.6 * d_arbre  # mm
+
+            # Indiquer quelles valeurs ont été auto-déduites
+            auto = []
+            if d_cyl_auto: auto.append("diamètre cylindre")
+            if course_auto: auto.append("course piston")
+            if freq_auto: auto.append("fréquence")
+
+            txtauto = ""
+            if auto:
+                txtauto = "Valeurs complétées automatiquement : " + ", ".join(auto) + "\n"
+
+            self.resultat.config(text=f"""{txtauto}
+🌡️ Entrées : Tₕ={T_hot_C:.1f} °C, T𝒇={T_cold_C:.1f} °C, P={P_bar_val:.1f} bar, d={d_cyl:.1f} mm, course={course:.1f} mm, f={freq:.2f} Hz, gaz={gaz}
+🔄 Cylindres : {nb_cyl}
+
+⏩ Rendement Carnot : {eta_carnot*100:.1f} %
+⏩ Rendement global réel : {eta_reel*100:.2f} %
+
+🛠️ Volume balayé : {V*1e6:.2f} cm³
+🛞 Tours/minute : {rpm:.0f}
+⚡️ Puissance nette électrique : {P_elec:.1f} W
+⛓️ Couple arbre : {couple:.2f} Nm
+
+🧱 Dimension mini arbre : Ø {d_arbre:.2f} mm × {l_arbre:.2f} mm
+""")
+
+        except Exception as e:
+            self.resultat.config(text=f"Erreur : {str(e)}")
 
 
 # ----- Lancement -----
