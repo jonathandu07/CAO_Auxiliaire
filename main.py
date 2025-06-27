@@ -256,9 +256,6 @@ Résistance limite du matériau : {Re:.2f} Pa
             self.resultat_label.config(text=f"Erreur : {str(e)}")
 
 
-
-
-
 class PageMateriaux(tk.Frame):
     def __init__(self, parent, controller):
         super().__init__(parent, bg=COULEURS["fond"])
@@ -425,19 +422,22 @@ class PageDroneStructure(tk.Frame):
         form_frame = tk.Frame(self, bg=COULEURS["fond"])
         form_frame.pack()
 
-        self.longueur_entry = self._champ(form_frame, "Longueur de l’aile (m)", 0)
-        self.hauteur_entry = self._champ(form_frame, "Hauteur maximale (m)", 1)
+        self.longueur_entry = self._champ(form_frame, "Longueur de la corde (m)", 0)
+        self.hauteur_entry = self._champ(form_frame, "Épaisseur max (m)", 1)
+        # Optionnel : rendre la cambrure et sa position réglable
+        self.camber_entry = self._champ(form_frame, "Cambrure max (%)", 2, default="2.0")
+        self.camberpos_entry = self._champ(form_frame, "Position cambrure max (%)", 3, default="40")
 
         bouton_flat(self, "Afficher le profil", self.afficher_profil).pack(pady=15)
         bouton_flat(self, "Retour", lambda: controller.afficher_page(PageAccueil)).pack(pady=10)
 
         self.canvas = None
 
-    def _champ(self, parent, label, row):
-        l = tk.Label(parent, text=label, bg=COULEURS["fond"], fg=COULEURS["texte"],
-                     font=("Segoe UI", 10))
+    def _champ(self, parent, label, row, default=""):
+        l = tk.Label(parent, text=label, bg=COULEURS["fond"], fg=COULEURS["texte"], font=("Segoe UI", 10))
         l.grid(row=row, column=0, sticky="w", padx=10, pady=5)
         e = tk.Entry(parent, font=("Segoe UI", 10), width=10)
+        e.insert(0, default)
         e.grid(row=row, column=1, padx=10)
         return e
 
@@ -445,35 +445,69 @@ class PageDroneStructure(tk.Frame):
         try:
             L = float(self.longueur_entry.get())
             H = float(self.hauteur_entry.get())
+            camber = float(self.camber_entry.get()) / 100  # ex : 2% = 0.02
+            camber_pos = float(self.camberpos_entry.get()) / 100  # ex : 40% = 0.4
         except ValueError:
+            self._show_error("Saisies invalides.")
             return
 
-        # Génération d’un profil type NACA simplifié (cambrure max = H/L)
-        x = np.linspace(0, 1, 200)
-        m = H / L  # cambrure relative
-        t = 0.12   # épaisseur relative fixe
+        t = H / L  # épaisseur relative
+        n = 400  # points pour la courbe
 
-        yt = 5 * t * (0.2969*np.sqrt(x) - 0.1260*x - 0.3516*x**2 + 0.2843*x**3 - 0.1015*x**4)
-        yc = np.where(x < 0.5, m * x / 0.5, m * (1 - x) / 0.5)
-        xu, yu = x - yt*np.sin(0), yc + yt*np.cos(0)
-        xl, yl = x + yt*np.sin(0), yc - yt*np.cos(0)
+        x = np.linspace(0, L, n)
+        xt = x / L
 
-        fig = Figure(figsize=(5, 2), dpi=100)
+        # Calcul épaisseur et cambrure selon NACA 4 chiffres
+        yt = 5 * t * (
+            0.2969 * np.sqrt(xt) -
+            0.1260 * xt -
+            0.3516 * xt**2 +
+            0.2843 * xt**3 -
+            0.1015 * xt**4
+        )
+
+        yc = np.where(
+            x < camber_pos * L,
+            camber / camber_pos**2 * (2 * camber_pos * x / L - (x / L)**2),
+            camber / (1 - camber_pos)**2 * ((1 - 2 * camber_pos) + 2 * camber_pos * x / L - (x / L)**2)
+        )
+
+        dyc_dx = np.where(
+            x < camber_pos * L,
+            2 * camber / camber_pos**2 * (camber_pos - x / L),
+            2 * camber / (1 - camber_pos)**2 * (camber_pos - x / L)
+        )
+        theta = np.arctan(dyc_dx)
+
+        xu = x - yt * np.sin(theta)
+        yu = yc + yt * np.cos(theta)
+        xl = x + yt * np.sin(theta)
+        yl = yc - yt * np.cos(theta)
+
+        fig = Figure(figsize=(7, 2.5), dpi=100)
         ax = fig.add_subplot(111)
-        ax.plot(xu*L, yu*L, label="Extrados")
-        ax.plot(xl*L, yl*L, label="Intrados")
+        ax.plot(xu, yu, label="Extrados", color='blue')
+        ax.plot(xl, yl, label="Intrados", color='red')
+        ax.fill_between(xu, yu, yl, where=(yu > yl), color='lightblue', alpha=0.3)
+        ax.set_title(f"Profil NACA optimisé - Corde={L:.2f}m, Ép.={H:.3f}m, Cambrure={camber*100:.1f}%")
+        ax.set_xlabel("x (m)")
+        ax.set_ylabel("y (m)")
         ax.axis("equal")
-        ax.set_title("Profil d’aile généré")
-        ax.set_xlabel("Longueur (m)")
-        ax.set_ylabel("Hauteur (m)")
+        ax.legend()
         ax.grid(True)
 
         if self.canvas:
             self.canvas.get_tk_widget().destroy()
-
         self.canvas = FigureCanvasTkAgg(fig, master=self)
         self.canvas.draw()
         self.canvas.get_tk_widget().pack(pady=10)
+
+    def _show_error(self, msg):
+        error_popup = tk.Toplevel(self)
+        error_popup.title("Erreur")
+        tk.Label(error_popup, text=msg, fg="red").pack(padx=20, pady=10)
+        bouton_flat(error_popup, "OK", error_popup.destroy).pack(pady=5)
+
 
 class PageDronePropulsion(tk.Frame):
     def __init__(self, parent, controller):
