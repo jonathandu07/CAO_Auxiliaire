@@ -139,7 +139,7 @@ class PageCalculs(tk.Frame):
         tk.Entry(self, textvariable=self.tolerance_var).pack()
 
         # Saisie des paramètres communs
-        champs = [
+        self.champs_liste = [
             ("Section (mm²)", "section"),
             ("Longueur (mm)", "longueur"),
             ("Force appliquée (N)", "force"),
@@ -148,7 +148,7 @@ class PageCalculs(tk.Frame):
             ("Module d’inertie (mm⁴)", "inertie")
         ]
         self.entrees = {}
-        for label, cle in champs:
+        for label, cle in self.champs_liste:
             tk.Label(self, text=label, bg=COULEURS["fond"], fg=COULEURS["texte"]).pack()
             entree = tk.Entry(self)
             entree.pack()
@@ -171,63 +171,74 @@ class PageCalculs(tk.Frame):
 
     def calculer(self):
         try:
-            # Lecture des entrées avec fallback intelligent
             tol = float(self.tolerance_var.get() or "20") / 100
-
-            # Récupération ou déduction de la force
-            masse = self.kg_var.get()
-            F = self.entrees["force"].get()
-            if not F and masse:
-                # Masse convertie automatiquement en N
-                F = float(masse) * 9.81
-                F_info = f"(Force déduite de la masse {masse} kg : {F:.1f} N)"
-            else:
-                F = float(F or 0)
-                F_info = ""
-
-            # Section : si non précisée, on va la calculer automatiquement plus bas
-            section_txt = self.entrees["section"].get()
-            L = float(self.entrees["longueur"].get() or 1000) / 1000  # défaut 1 m
-            M = float(self.entrees["moment"].get() or 0)
-            T = float(self.entrees["couple"].get() or 0)
-            I = float(self.entrees["inertie"].get() or 1e8) / 1e12  # défaut raisonnable
-
             mat_selectionne = self.materiau_var.get()
             prop = MATERIAUX[mat_selectionne]
             E = prop["E"]
             Re = prop["Re"]
 
-            if not section_txt or float(section_txt) == 0:
-                # Si l'utilisateur n'a pas donné la section, on l'estime !
-                A = (F / ((1 - tol) * Re)) * 1e6  # en mm²
-                A_aff = A
-                section_calculée = True
-            else:
-                A = float(section_txt)
-                section_calculée = False
-                A_aff = A
+            # Récupère tout ce qui a été saisi
+            vals = {k: self.entrees[k].get().strip() for _, k in self.champs_liste}
+            log_auto = []
 
-            A_m2 = A_aff / 1e6
+            # 1) Déduction force à partir de la masse si champ force vide et masse renseignée
+            masse_kg = self.kg_var.get().strip()
+            if (not vals["force"] or float(vals["force"]) == 0) and masse_kg:
+                force_val = float(masse_kg) * 9.81
+                vals["force"] = f"{force_val:.3f}"
+                self.entrees["force"].delete(0, tk.END)
+                self.entrees["force"].insert(0, vals["force"])
+                log_auto.append(f"Force déduite de la masse : {vals['force']} N")
 
-            sigma_traction = F / A_m2 if A_m2 else 0
+            # 2) Section automatique si section manquante mais force présente
+            if (not vals["section"] or float(vals["section"]) == 0) and vals["force"]:
+                section_val = (float(vals["force"]) / ((1 - tol) * Re)) * 1e6  # mm²
+                vals["section"] = f"{section_val:.1f}"
+                self.entrees["section"].delete(0, tk.END)
+                self.entrees["section"].insert(0, vals["section"])
+                log_auto.append(f"Section calculée à partir de la force : {vals['section']} mm²")
+
+            # 3) Force admissible si section saisie mais pas de force
+            if (not vals["force"] or float(vals["force"]) == 0) and vals["section"]:
+                force_max = (float(vals["section"]) / 1e6) * ((1 - tol) * Re)
+                vals["force"] = f"{force_max:.1f}"
+                self.entrees["force"].delete(0, tk.END)
+                self.entrees["force"].insert(0, vals["force"])
+                log_auto.append(f"Force max admissible recalculée : {vals['force']} N")
+
+            # 4) Pour flexion, torsion, flambement : utilise valeurs si présentes sinon 0
+            try:    L = float(vals["longueur"]) / 1000 if vals["longueur"] else 1
+            except: L = 1
+            try:    M = float(vals["moment"]) if vals["moment"] else 0
+            except: M = 0
+            try:    T = float(vals["couple"]) if vals["couple"] else 0
+            except: T = 0
+            try:    I = float(vals["inertie"]) / 1e12 if vals["inertie"] else 1e-4
+            except: I = 1e-4
+
+            # 5) Contraintes
+            A = float(vals["section"]) / 1e6 if vals["section"] else 1e-6
+            F = float(vals["force"]) if vals["force"] else 0
+
+            sigma_traction = F / A if A else 0
             sigma_flexion = M * (L / 2) / I if I else 0
             tau_torsion = T * (L / 2) / I if I else 0
             flambement = (np.pi ** 2 * E * I) / (L ** 2) if I else 0
 
-            # Recherche du meilleur matériau
+            # 6) Recherche meilleur matériau
             meilleurs = []
             for nom, props in MATERIAUX.items():
                 Re_mat = props["Re"]
-                if Re_mat == 0:
-                    continue
-                A_calc = (F / ((1 - tol) * Re_mat)) * 1e6
+                if Re_mat == 0: continue
+                A_calc = (F / ((1 - tol) * Re_mat)) * 1e6 if F else 0
                 meilleurs.append((nom, A_calc))
+            meilleurs = [t for t in meilleurs if t[1] > 0]
             meilleurs.sort(key=lambda x: x[1])
-            meilleur_mat, meilleure_section = meilleurs[0]
+            meilleur_mat, meilleure_section = (meilleurs[0] if meilleurs else ("-", 0))
 
             resultat = ""
-            if F_info:
-                resultat += F_info + "\n"
+            if log_auto:
+                resultat += "Données déduites automatiquement :\n- " + "\n- ".join(log_auto) + "\n\n"
             resultat += f"""
 Contrainte de traction : {sigma_traction:.2f} Pa
 Contrainte de flexion : {sigma_flexion:.2f} Pa
@@ -235,19 +246,15 @@ Contrainte de torsion : {tau_torsion:.2f} Pa
 Charge critique de flambement : {flambement:.2f} N
 Résistance limite du matériau : {Re:.2f} Pa
 
-📐 Section requise avec {mat_selectionne} : {A_aff:.2f} mm² (tolérance {tol*100:.0f}%)
+📐 Section requise avec {mat_selectionne} : {vals['section']} mm² (tolérance {tol*100:.0f}%)
 """
-            if section_calculée:
-                resultat += "(Section automatiquement calculée à partir des données)\n"
-
-            resultat += f"""
-✅ Meilleur matériau : {meilleur_mat}
-👉 Section minimale requise : {meilleure_section:.2f} mm²
-"""
+            if meilleur_mat != "-":
+                resultat += f"\n✅ Meilleur matériau : {meilleur_mat}\n👉 Section minimale requise : {meilleure_section:.2f} mm²\n"
 
             self.resultat_label.config(text=resultat.strip())
         except Exception as e:
             self.resultat_label.config(text=f"Erreur : {str(e)}")
+
 
 
 
