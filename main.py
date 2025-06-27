@@ -16,7 +16,7 @@ import pandas as pd
 COULEURS = {
     "fond": "#F4FEFE",         # Blanc-Lunaire
     "primaire": "#051440",     # Bleu-France
-    "accent": "#FFC600",       # Jaune-Vatican
+    "accent": "#0A0B0A",       # Jaune-Vatican
     "texte": "#1E1E1E",        # Noir-Figma
     "bouton": "#303030",       # Anthracite
     "hover": "#3E5349",        # Natural-Green (pour effet hover)
@@ -171,27 +171,50 @@ class PageCalculs(tk.Frame):
 
     def calculer(self):
         try:
-            tol = float(self.tolerance_var.get()) / 100
-            F = float(self.entrees["force"].get())
-            L = float(self.entrees["longueur"].get()) / 1000
-            M = float(self.entrees["moment"].get())
-            T = float(self.entrees["couple"].get())
-            I = float(self.entrees["inertie"].get()) / 1e12
-            A = float(self.entrees["section"].get()) / 1e6
+            # Lecture des entrées avec fallback intelligent
+            tol = float(self.tolerance_var.get() or "20") / 100
+
+            # Récupération ou déduction de la force
+            masse = self.kg_var.get()
+            F = self.entrees["force"].get()
+            if not F and masse:
+                # Masse convertie automatiquement en N
+                F = float(masse) * 9.81
+                F_info = f"(Force déduite de la masse {masse} kg : {F:.1f} N)"
+            else:
+                F = float(F or 0)
+                F_info = ""
+
+            # Section : si non précisée, on va la calculer automatiquement plus bas
+            section_txt = self.entrees["section"].get()
+            L = float(self.entrees["longueur"].get() or 1000) / 1000  # défaut 1 m
+            M = float(self.entrees["moment"].get() or 0)
+            T = float(self.entrees["couple"].get() or 0)
+            I = float(self.entrees["inertie"].get() or 1e8) / 1e12  # défaut raisonnable
 
             mat_selectionne = self.materiau_var.get()
             prop = MATERIAUX[mat_selectionne]
             E = prop["E"]
             Re = prop["Re"]
 
-            # Contraintes pour matériau sélectionné
-            sigma_traction = F / A
+            if not section_txt or float(section_txt) == 0:
+                # Si l'utilisateur n'a pas donné la section, on l'estime !
+                A = (F / ((1 - tol) * Re)) * 1e6  # en mm²
+                A_aff = A
+                section_calculée = True
+            else:
+                A = float(section_txt)
+                section_calculée = False
+                A_aff = A
+
+            A_m2 = A_aff / 1e6
+
+            sigma_traction = F / A_m2 if A_m2 else 0
             sigma_flexion = M * (L / 2) / I if I else 0
             tau_torsion = T * (L / 2) / I if I else 0
             flambement = (np.pi ** 2 * E * I) / (L ** 2) if I else 0
-            A_min = (F / ((1 - tol) * Re)) * 1e6  # m² → mm²
 
-            # 🧠 Recherche du meilleur matériau selon A_min
+            # Recherche du meilleur matériau
             meilleurs = []
             for nom, props in MATERIAUX.items():
                 Re_mat = props["Re"]
@@ -199,25 +222,34 @@ class PageCalculs(tk.Frame):
                     continue
                 A_calc = (F / ((1 - tol) * Re_mat)) * 1e6
                 meilleurs.append((nom, A_calc))
-            meilleurs.sort(key=lambda x: x[1])  # tri par section minimale croissante
+            meilleurs.sort(key=lambda x: x[1])
             meilleur_mat, meilleure_section = meilleurs[0]
 
-            resultat = f"""
+            resultat = ""
+            if F_info:
+                resultat += F_info + "\n"
+            resultat += f"""
 Contrainte de traction : {sigma_traction:.2f} Pa
 Contrainte de flexion : {sigma_flexion:.2f} Pa
 Contrainte de torsion : {tau_torsion:.2f} Pa
 Charge critique de flambement : {flambement:.2f} N
 Résistance limite du matériau : {Re:.2f} Pa
 
-📐 Section requise avec {mat_selectionne} : {A_min:.2f} mm² (tolérance {tol*100:.0f}%)
-
-✅ Meilleur matériau : {meilleur_mat}
-👉 Section minimale requise : {meilleure_section:.2f} mm²
+📐 Section requise avec {mat_selectionne} : {A_aff:.2f} mm² (tolérance {tol*100:.0f}%)
 """
-            self.resultat_label.config(text=resultat.strip())
+            if section_calculée:
+                resultat += "(Section automatiquement calculée à partir des données)\n"
 
+            resultat += f"""
+✅ Meilleur matériau : {meilleur_mat}
+👉 Section minimale requise : {meilleure_section:.2f} mm²
+"""
+
+            self.resultat_label.config(text=resultat.strip())
         except Exception as e:
             self.resultat_label.config(text=f"Erreur : {str(e)}")
+
+
 
 
 class PageMateriaux(tk.Frame):
@@ -273,7 +305,6 @@ class PageMoteurStirling(tk.Frame):
             ("Pression moyenne (bar)", "pression"),
             ("Fréquence de fonctionnement (Hz)", "freq")
         ]
-
         for label, cle in donnees:
             f = tk.Frame(self, bg=COULEURS["fond"])
             tk.Label(f, text=label, font=("Segoe UI", 10), width=30, anchor="w",
@@ -304,23 +335,41 @@ class PageMoteurStirling(tk.Frame):
 
     def calculer(self):
         try:
-            W = float(self.champs["puissance"].get())
-            T_hot = float(self.champs["t_chaude"].get()) + 273.15
-            T_cold = float(self.champs["t_froide"].get()) + 273.15
-            P_bar = float(self.champs["pression"].get())
-            f = float(self.champs["freq"].get())
+            # Valeurs par défaut ingénieur
+            defval = {
+                "puissance": 1000,      # W
+                "t_chaude": 650,        # °C
+                "t_froide": 40,         # °C
+                "pression": 20,         # bar
+                "freq": 30              # Hz
+            }
+            # Récupère ou complète les champs
+            def getval(champ):
+                txt = self.champs[champ].get()
+                return float(txt) if txt else defval[champ]
+
+            W = getval("puissance")
+            T_hot = getval("t_chaude") + 273.15
+            T_cold = getval("t_froide") + 273.15
+            P_bar = getval("pression")
+            f = getval("freq")
             gaz = self.gaz_var.get()
 
-            rendement = 0.35  # estimation réaliste
+            rendement = 0.35  # réaliste (35% du rendement de Carnot)
             delta_T = T_hot - T_cold
             eta_carnot = delta_T / T_hot
             eta_total = eta_carnot * rendement
+
+            # Protection contre les divisions par zéro (ex : T_hot == T_cold)
+            if eta_total < 0.01:
+                raise ValueError("Différence de température trop faible pour calculer un moteur réaliste.")
+
             energie_cycle = W / (f * eta_total)
-
             P_Pa = P_bar * 1e5
-            V_tot = energie_cycle / (P_Pa * delta_T / T_hot)
+            V_tot = energie_cycle / (P_Pa * delta_T / T_hot)  # m³
 
-            d_cyl = (4 * V_tot * 1e6 / (np.pi * 30)) ** (1 / 3)
+            # Calcul des dimensions caractéristiques (exemple type)
+            d_cyl = (4 * V_tot * 1e6 / (np.pi * 30)) ** (1 / 3)     # mm
             h_cyl = 1.2 * d_cyl
             course = h_cyl / 2
             vilebrequin = course / 2
@@ -330,7 +379,16 @@ class PageMoteurStirling(tk.Frame):
             etat_surface = "Ra ≤ 0.4 µm"
             roulement = "Roulement à billes étanche, acier inox ou céramique"
 
-            self.resultat.config(text=f"""
+            auto_txt = []
+            for champ, val in defval.items():
+                if not self.champs[champ].get():
+                    auto_txt.append(f"{champ.replace('_',' ').capitalize()} → {val}")
+
+            txtauto = ""
+            if auto_txt:
+                txtauto = "Valeurs complétées automatiquement : " + ", ".join(auto_txt) + "\n"
+
+            self.resultat.config(text=f"""{txtauto}
 🔧 Résultats pour {W:.0f} W avec gaz = {gaz} :
 - Volume total : {V_tot*1e6:.2f} cm³
 - Diamètre du cylindre : {d_cyl:.2f} mm
@@ -345,6 +403,7 @@ class PageMoteurStirling(tk.Frame):
 """)
         except Exception as e:
             self.resultat.config(text=f"Erreur : {str(e)}")
+
 
 
 
