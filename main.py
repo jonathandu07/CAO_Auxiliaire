@@ -1,6 +1,9 @@
 import tkinter as tk
 import os
 from PIL import Image, ImageTk
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import numpy as np
 
 # Couleurs officielles (extraites de l'image)
 COULEURS = {
@@ -186,14 +189,112 @@ class PageMoteurStirling(tk.Frame):
 class PageDroneStructure(tk.Frame):
     def __init__(self, parent, controller):
         super().__init__(parent, bg=COULEURS["fond"])
-        tk.Label(self, text="Structure du drone (à venir)", bg=COULEURS["fond"],
-                 fg=COULEURS["primaire"], font=("Segoe UI", 16)).pack(pady=30)
+
+        tk.Label(self, text="Profil de l’aile du drone", bg=COULEURS["fond"],
+                 fg=COULEURS["primaire"], font=("Segoe UI", 18, "bold")).pack(pady=20)
+
+        form_frame = tk.Frame(self, bg=COULEURS["fond"])
+        form_frame.pack()
+
+        self.longueur_entry = self._champ(form_frame, "Longueur de l’aile (m)", 0)
+        self.hauteur_entry = self._champ(form_frame, "Hauteur maximale (m)", 1)
+
+        bouton_flat(self, "Afficher le profil", self.afficher_profil).pack(pady=15)
+        bouton_flat(self, "Retour", lambda: controller.afficher_page(PageAccueil)).pack(pady=10)
+
+        self.canvas = None
+
+    def _champ(self, parent, label, row):
+        l = tk.Label(parent, text=label, bg=COULEURS["fond"], fg=COULEURS["texte"],
+                     font=("Segoe UI", 10))
+        l.grid(row=row, column=0, sticky="w", padx=10, pady=5)
+        e = tk.Entry(parent, font=("Segoe UI", 10), width=10)
+        e.grid(row=row, column=1, padx=10)
+        return e
+
+    def afficher_profil(self):
+        try:
+            L = float(self.longueur_entry.get())
+            H = float(self.hauteur_entry.get())
+        except ValueError:
+            return
+
+        # Génération d’un profil type NACA simplifié (cambrure max = H/L)
+        x = np.linspace(0, 1, 200)
+        m = H / L  # cambrure relative
+        t = 0.12   # épaisseur relative fixe
+
+        yt = 5 * t * (0.2969*np.sqrt(x) - 0.1260*x - 0.3516*x**2 + 0.2843*x**3 - 0.1015*x**4)
+        yc = np.where(x < 0.5, m * x / 0.5, m * (1 - x) / 0.5)
+        xu, yu = x - yt*np.sin(0), yc + yt*np.cos(0)
+        xl, yl = x + yt*np.sin(0), yc - yt*np.cos(0)
+
+        fig = Figure(figsize=(5, 2), dpi=100)
+        ax = fig.add_subplot(111)
+        ax.plot(xu*L, yu*L, label="Extrados")
+        ax.plot(xl*L, yl*L, label="Intrados")
+        ax.axis("equal")
+        ax.set_title("Profil d’aile généré")
+        ax.set_xlabel("Longueur (m)")
+        ax.set_ylabel("Hauteur (m)")
+        ax.grid(True)
+
+        if self.canvas:
+            self.canvas.get_tk_widget().destroy()
+
+        self.canvas = FigureCanvasTkAgg(fig, master=self)
+        self.canvas.draw()
+        self.canvas.get_tk_widget().pack(pady=10)
 
 class PageDronePropulsion(tk.Frame):
     def __init__(self, parent, controller):
         super().__init__(parent, bg=COULEURS["fond"])
-        tk.Label(self, text="Propulsion du drone (à venir)", bg=COULEURS["fond"],
-                 fg=COULEURS["primaire"], font=("Segoe UI", 16)).pack(pady=30)
+
+        tk.Label(self, text="Calcul de propulsion du drone", bg=COULEURS["fond"],
+                 fg=COULEURS["primaire"], font=("Segoe UI", 18, "bold")).pack(pady=20)
+
+        form_frame = tk.Frame(self, bg=COULEURS["fond"])
+        form_frame.pack()
+
+        self.poids_entry = self._champ(form_frame, "Poids du drone (kg)", 0)
+        self.autonomie_entry = self._champ(form_frame, "Autonomie visée (min)", 1)
+
+        bouton_flat(self, "Calculer", self.calculer_propulsion).pack(pady=15)
+
+        self.resultat_label = tk.Label(self, text="", bg=COULEURS["fond"],
+                                       fg=COULEURS["texte"], font=("Segoe UI", 11), justify="left")
+        self.resultat_label.pack(pady=10)
+
+        bouton_flat(self, "Retour", lambda: controller.afficher_page(PageAccueil)).pack(pady=10)
+
+    def _champ(self, parent, label, row):
+        tk.Label(parent, text=label, bg=COULEURS["fond"], fg=COULEURS["texte"],
+                 font=("Segoe UI", 10), width=30, anchor="w").grid(row=row, column=0, padx=10, pady=5)
+        e = tk.Entry(parent, font=("Segoe UI", 10), width=15)
+        e.grid(row=row, column=1, padx=10)
+        return e
+
+    def calculer_propulsion(self):
+        try:
+            masse = float(self.poids_entry.get())  # en kg
+            autonomie = float(self.autonomie_entry.get()) / 60  # min → h
+        except ValueError:
+            self.resultat_label.config(text="Entrées invalides.")
+            return
+
+        g = 9.81  # m/s²
+        rendement = 0.7
+        puissance_w = (masse * g * 5) / rendement  # estimation 5 m/s montée verticale
+        energie_wh = puissance_w * autonomie
+        tension_v = 22.2  # batterie LiPo 6S standard
+        courant_a = energie_wh / tension_v
+
+        self.resultat_label.config(text=f"""
+Puissance moteur nécessaire : {puissance_w:.0f} W
+Capacité minimale batterie : {energie_wh:.0f} Wh
+Courant requis (à {tension_v} V) : {courant_a:.1f} A
+""")
+
 
 class PageDroneIA(tk.Frame):
     def __init__(self, parent, controller):
