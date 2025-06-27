@@ -335,17 +335,26 @@ class PageMoteurStirling(tk.Frame):
             ("Température chaude (°C)", "t_chaude"),
             ("Température froide (°C)", "t_froide"),
             ("Pression moyenne (bar)", "pression"),
-            ("Fréquence de fonctionnement (Hz)", "freq"),
             ("Diamètre du cylindre (mm)", "d_cyl"),
-            ("Nombre de joints piston", "nb_joints")
+            ("Nombre de joints piston", "nb_joints"),
+            ("Rendement génératrice (%)", "rendement_gen"),
+            ("Rendement mécanique (%)", "rendement_mec"),
+            ("Rendement moteur Stirling (%)", "rendement_stirling"),
         ]
         for i, (label, cle) in enumerate(donnees):
-            l = tk.Label(form_zone, text=label, font=("Segoe UI", 11), width=25, anchor="w",
+            l = tk.Label(form_zone, text=label, font=("Segoe UI", 11), width=28, anchor="w",
                          bg=COULEURS["fond"], fg=COULEURS["texte"])
             l.grid(row=i, column=0, sticky="w", padx=6, pady=5)
-            entry = tk.Entry(form_zone, width=14, font=("Segoe UI", 11))
-            entry.grid(row=i, column=1, padx=6, pady=5)
+            entry = tk.Entry(form_zone, width=12, font=("Segoe UI", 11))
+            if "rendement" in cle:
+                entry.insert(0, {"rendement_gen": "90", "rendement_mec": "80", "rendement_stirling": "35"}.get(cle, ""))
+            if cle == "nb_joints":
+                entry.insert(0, "2")
+            form_default = {"puissance": "1000", "t_chaude": "650", "t_froide": "40", "pression": "20", "d_cyl": ""}
+            if cle in form_default:
+                entry.insert(0, form_default[cle])
             self.champs[cle] = entry
+            entry.grid(row=i, column=1, padx=6, pady=5)
 
         # Gaz
         f_gaz = tk.Frame(form_zone, bg=COULEURS["fond"])
@@ -389,119 +398,122 @@ class PageMoteurStirling(tk.Frame):
 
     def calculer(self):
         try:
-            # Valeurs par défaut ingénieur/proto
-            defval = {
-                "puissance": 1000,
-                "t_chaude": 650,
-                "t_froide": 40,
-                "pression": 20,
-                "freq": 30,
-                "d_cyl": None,
-                "nb_joints": 2
-            }
-            def getval(champ):
-                txt = self.champs[champ].get()
-                if not txt and champ != "d_cyl":
-                    return float(defval[champ])
-                if champ == "d_cyl" and not txt:
-                    return None
-                if champ == "nb_joints" and not txt:
-                    return int(defval[champ])
-                return float(txt) if champ != "nb_joints" else int(txt)
+            # 1. Lecture des champs et valeurs par défaut
+            def getval(champ, typ=float, defval=None):
+                txt = self.champs[champ].get().strip()
+                if txt: return typ(txt)
+                if defval is not None: return defval
+                raise ValueError(f"Champ manquant : {champ}")
 
-            W = getval("puissance")
-            T_hot_C = getval("t_chaude")
+            W = getval("puissance", float, 1000)
+            T_hot_C = getval("t_chaude", float, 650)
             T_hot = T_hot_C + 273.15
-            T_cold = getval("t_froide") + 273.15
-            P_bar = getval("pression")
-            f = getval("freq")
-            d_cyl_user = getval("d_cyl")
-            nb_joints = getval("nb_joints")
+            T_cold_C = getval("t_froide", float, 40)
+            T_cold = T_cold_C + 273.15
+            P_bar = getval("pression", float, 20)
+            d_cyl_user = getval("d_cyl", float, None)
+            nb_joints = getval("nb_joints", int, 2)
             gaz = self.gaz_var.get()
+            rendement_gen = getval("rendement_gen", float, 90) / 100
+            rendement_mec = getval("rendement_mec", float, 80) / 100
+            rendement_stirling = getval("rendement_stirling", float, 35) / 100
 
-            # Matériau recommandé
-            materiau = self._materiau_recommande(T_hot_C)
+            # Constantes physiques du gaz
+            gaz_data = {
+                "Air": {"R": 287, "gamma": 1.4, "rho0": 1.29},
+                "Hélium": {"R": 2077, "gamma": 1.66, "rho0": 0.18},
+                "Hydrogène": {"R": 4124, "gamma": 1.41, "rho0": 0.09},
+                "Azote": {"R": 296, "gamma": 1.4, "rho0": 1.25},
+            }
+            gaz_phys = gaz_data.get(gaz, gaz_data["Air"])
 
-            rendement = 0.35
+            # 2. Calculs thermodynamiques
             delta_T = T_hot - T_cold
             eta_carnot = delta_T / T_hot
-            eta_total = eta_carnot * rendement
+            eta_total = eta_carnot * rendement_stirling
             if eta_total < 0.01:
                 raise ValueError("Différence de température trop faible pour calculer un moteur réaliste.")
 
-            energie_cycle = W / (f * eta_total)
-            P_Pa = P_bar * 1e5
-            V_tot = energie_cycle / (P_Pa * delta_T / T_hot)  # m³
+            # Puissance thermique nécessaire pour la puissance utile
+            Qth_necessaire = W / (eta_total * rendement_mec * rendement_gen)
 
-            # Géométrie (tout en mm)
+            # Calcul du volume total balayé
+            P_Pa = P_bar * 1e5
+            energie_cycle = W / (1 * eta_total)  # cycle par seconde (1 Hz) utilisé pour base
+            V_tot_base = energie_cycle / (P_Pa * delta_T / T_hot)  # m³, à 1Hz pour estimation
+
+            # Géométrie (si d_cyl imposé ou non)
             if d_cyl_user:
                 d_cyl = d_cyl_user
                 A_cyl = np.pi * (d_cyl / 2) ** 2  # mm²
-                h_cyl_utile = (V_tot * 1e9) / A_cyl  # mm (utile)
+                h_cyl_utile = (V_tot_base * 1e9) / A_cyl  # mm
             else:
-                d_cyl = (4 * V_tot * 1e9 / (np.pi * 1.5)) ** (1/3)  # mm
+                d_cyl = (4 * V_tot_base * 1e9 / (np.pi * 1.5)) ** (1/3)  # mm
                 A_cyl = np.pi * (d_cyl / 2) ** 2
-                h_cyl_utile = (V_tot * 1e9) / A_cyl  # mm
+                h_cyl_utile = (V_tot_base * 1e9) / A_cyl  # mm
 
             # Prise en compte de tous les éléments mécaniques
-            e_piston = max(0.22 * d_cyl, 10)  # Galette : 22% du diamètre, min 10mm
-            e_joint = 2.5  # mm par joint (classique Viton/graphite)
-            zone_morte = 0.08 * h_cyl_utile  # 8% de zone morte (haut+bas)
-            jeu_fonctionnement = 0.018 * h_cyl_utile  # 1.8% de jeu sur la hauteur
-
+            e_piston = max(0.22 * d_cyl, 10)
+            e_joint = 2.5
+            zone_morte = 0.08 * h_cyl_utile
+            jeu_fonctionnement = 0.018 * h_cyl_utile
             h_cyl_total = (
-                h_cyl_utile
-                + e_piston
-                + nb_joints * e_joint
-                + 2 * zone_morte
-                + jeu_fonctionnement
+                h_cyl_utile + e_piston + nb_joints * e_joint + 2 * zone_morte + jeu_fonctionnement
             )
             course = h_cyl_utile / 2
             vilebrequin = course / 2
-            couple = W / (2 * np.pi * f)
-            rpm = f * 60
 
-            # Stockage des valeurs pour la boîte à crabots, APRÈS calcul
-            self.controller.memo_moteur_stirling = {
-                "rpm": rpm,
-                "vilebrequin": vilebrequin,
-                "couple": couple,
-                "d_cyl": d_cyl
-            }
+            # 3. Calcul de la fréquence/max rpm en fonction des dimensions et de la pression
+            # Vitesse moyenne piston typique : 2 à 4 m/s max (sinon usure)
+            V_piston_max = 2.5  # m/s recommandé pour durabilité
+            course_m = course / 1000  # mm → m
+            freq_max = V_piston_max / (2 * course_m) if course_m > 0 else 1
+            freq = min(30, freq_max)  # limite arbitraire à 30 Hz pour éviter la destruction
 
+            rpm = freq * 60
+
+            # 4. Couple sur vilebrequin et puissance mécanique réelle
+            P_mec = W / (rendement_gen * rendement_mec)
+            couple = P_mec / (2 * np.pi * freq) if freq > 0 else 0
+
+            # 5. Production électrique
+            P_elec = P_mec * rendement_gen * rendement_mec * eta_total
+            production_annuelle = P_elec * 24 * 365 / 1000  # kWh/an
+
+            materiau = self._materiau_recommande(T_hot_C)
             etat_surface = "Ra ≤ 0.4 µm"
             roulement = "Roulement à billes étanche, acier inox ou céramique"
 
-            auto_txt = []
-            for champ, val in defval.items():
-                if champ == "d_cyl":
-                    if not self.champs[champ].get():
-                        auto_txt.append("Diamètre cylindre → calculé")
-                elif not self.champs[champ].get():
-                    auto_txt.append(f"{champ.replace('_',' ').capitalize()} → {val}")
+            # 6. Affichage synthétique
+            self.resultat.config(text=f"""
+🔧 Résultats pour {W:.0f} W (gaz : {gaz}) :
+- Temp. chaude : {T_hot_C:.0f} °C | Temp. froide : {T_cold_C:.0f} °C | Pression : {P_bar:.1f} bar
+- Rendement Carnot : {eta_carnot*100:.1f} % | Rendement réel moteur : {rendement_stirling*100:.1f} %
+- Rendement mécanique : {rendement_mec*100:.1f} % | Génératrice : {rendement_gen*100:.1f} %
+- Puissance thermique à fournir : {Qth_necessaire:.1f} W
 
-            txtauto = ""
-            if auto_txt:
-                txtauto = "Valeurs complétées automatiquement : " + ", ".join(auto_txt) + "\n"
+-- Géométrie --
+- Volume total balayé : {V_tot_base*1e6:.2f} cm³ (base 1 Hz)
+- Diamètre cylindre : {d_cyl:.2f} mm
+- Hauteur utile : {h_cyl_utile:.2f} mm | Hauteur totale : {h_cyl_total:.2f} mm
+- Course piston : {course:.2f} mm | Longueur vilebrequin : {vilebrequin:.2f} mm
 
-            self.resultat.config(text=f"""{txtauto}
-🔧 Résultats pour {W:.0f} W avec gaz = {gaz} :
-- Volume total : {V_tot*1e6:.2f} cm³
-- Diamètre du cylindre : {d_cyl:.2f} mm
-- Hauteur utile (calcul) : {h_cyl_utile:.2f} mm
-- Hauteur totale usinée (conception) : {h_cyl_total:.2f} mm
-  (piston ép. {e_piston:.1f} mm, {nb_joints} joints × {e_joint:.1f} mm, zones mortes {zone_morte:.2f} mm, jeu {jeu_fonctionnement:.2f} mm)
-- Course du piston : {course:.2f} mm
-- Longueur du vilebrequin : {vilebrequin:.2f} mm
-- Couple attendu : {couple:.2f} Nm
-- Vitesse de rotation : {rpm:.0f} tr/min
+-- Dynamique --
+- Vitesse moyenne piston max : {V_piston_max:.2f} m/s
+- Fréquence max possible : {freq_max:.2f} Hz
+- Fréquence de calcul : {freq:.2f} Hz | Vitesse de rotation : {rpm:.0f} tr/min
+- Couple sur vilebrequin : {couple:.2f} Nm
+
+-- Production électrique réelle --
+- Puissance électrique nette : {P_elec:.1f} W
+- Production annuelle 24/24 : {production_annuelle:.1f} kWh/an
 
 🛠️ État de surface : {etat_surface}
 ⚙️ Type de roulement : {roulement}
 🧱 Matériau recommandé (cylindre) : {materiau}
 """)
 
-            # ---- SCHEMA CAO (coupe longitudinale stylisée) ----
+            # ---- Schéma technique
             self.afficher_schema(d_cyl, h_cyl_utile, e_piston, nb_joints, e_joint,
                                 zone_morte, jeu_fonctionnement, h_cyl_total)
 
@@ -521,7 +533,6 @@ class PageMoteurStirling(tk.Frame):
         ax.set_title("Coupe longitudinale du cylindre", fontsize=12)
 
         # Affichage stylisé du cylindre
-        # Repères verticaux : 0 en bas, tout monte (y)
         y = 0
         legend_handles = []
 
@@ -579,6 +590,7 @@ class PageMoteurStirling(tk.Frame):
         self.canvas = FigureCanvasTkAgg(fig, master=self.schema_zone)
         self.canvas.draw()
         self.canvas.get_tk_widget().pack(pady=10)
+
 
 
 
@@ -1143,25 +1155,23 @@ class PageVilebrequin(tk.Frame):
         form = tk.Frame(self, bg=COULEURS["fond"])
         form.pack(pady=10)
 
-        # Entrées principales
         self.puissance = self._champ(form, "Puissance transmise (W)", 0)
         self.vitesse = self._champ(form, "Vitesse de rotation (tr/min)", 1)
         self.couple = self._champ(form, "Couple transmis (Nm)", 2)
-        self.longueur = self._champ(form, "Longueur arbre (mm)", 3, default="80")
-        self.tol = self._champ(form, "Tolérance sécurité (%)", 4, default="20")
+        self.longueur = self._champ(form, "Longueur entre paliers (mm)", 3, default="80")
+        self.rayon_manivelle = self._champ(form, "Rayon excentrique (mm)", 4, default="20")
+        self.largeur_maneton = self._champ(form, "Largeur maneton (mm)", 5, default="18")
+        self.tol = self._champ(form, "Tolérance sécurité (%)", 6, default="20")
 
-        # Matériau
-        tk.Label(form, text="Matériau", bg=COULEURS["fond"], fg=COULEURS["texte"]).grid(row=5, column=0, sticky="w", padx=10, pady=5)
+        tk.Label(form, text="Matériau", bg=COULEURS["fond"], fg=COULEURS["texte"]).grid(row=7, column=0, sticky="w", padx=10, pady=5)
         self.mat_var = tk.StringVar(value="Acier S235")
-        tk.OptionMenu(form, self.mat_var, *MATERIAUX.keys()).grid(row=5, column=1, padx=10)
+        tk.OptionMenu(form, self.mat_var, *MATERIAUX.keys()).grid(row=7, column=1, padx=10)
 
         bouton_flat(self, "Calculer vilebrequin", self.calculer).pack(pady=10)
         self.resultat = tk.Label(self, text="", bg=COULEURS["fond"], fg=COULEURS["accent"], font=("Consolas", 10), justify="left")
         self.resultat.pack(pady=10)
 
-        # Schéma matplotlib
         self.canvas = None
-
         bouton_flat(self, "Retour", lambda: controller.afficher_page(PageAccueil)).pack(pady=15)
 
     def _champ(self, parent, label, row, default=""):
@@ -1174,14 +1184,20 @@ class PageVilebrequin(tk.Frame):
 
     def calculer(self):
         try:
-            # Récupère valeurs
             W = float(self.puissance.get()) if self.puissance.get() else None
             N = float(self.vitesse.get()) if self.vitesse.get() else None
             C = float(self.couple.get()) if self.couple.get() else None
-            L = float(self.longueur.get()) / 1000      # mm -> m
+            L = float(self.longueur.get())
+            r = float(self.rayon_manivelle.get())
+            b = float(self.largeur_maneton.get())
             tol = float(self.tol.get()) / 100
             mat = self.mat_var.get()
-            Re = MATERIAUX[mat]["Re"] * 1e6 if "Re" in MATERIAUX[mat] else 250e6 # MPa -> Pa
+
+            mat_props = MATERIAUX.get(mat)
+            if mat_props is None:
+                raise ValueError(f"Matériau '{mat}' introuvable dans la base.")
+
+            Re = float(mat_props["Re"]) * 1e6 if "Re" in mat_props else 250e6  # MPa -> Pa
 
             # Si couple absent, calcule à partir de puissance & vitesse
             if not C:
@@ -1190,47 +1206,93 @@ class PageVilebrequin(tk.Frame):
                 else:
                     raise ValueError("Donne au moins la puissance+vitesse ou le couple transmis.")
 
-            # Coeff de sécurité intégré à Re
             Re_adm = (1-tol) * Re
-            tau_adm = 0.6 * Re_adm   # cisaillement admissible, conventionnel (60% de la Re)
+            tau_adm = 0.6 * Re_adm
 
-            # Diamètre mini sous torsion pure : d = [(16*C)/(π*tau_adm)]^(1/3)
-            d_min = ((16*C) / (np.pi * tau_adm))**(1/3)
-            d_min_mm = d_min * 1000
+            # Diamètre min du maneton sous torsion et flexion combinée
+            d_m = ((16 * C) / (np.pi * tau_adm))**(1/3) * 1000  # mm
 
-            # Allongement sous torsion, pour info
-            G = MATERIAUX[mat]["E"] * 1e9 / (2*(1+0.3))  # Module de Young à module de cisaillement (G = E/2(1+ν)), ν~0.3
-            theta = C * L / (G * (np.pi/32) * d_min**4)  # rad
+            # Diamètre des paliers généralement > maneton
+            d_p = d_m * 1.15
 
             self.resultat.config(text=f"""
-🧮 Calcul pour : Couple = {C:.2f} Nm | L = {L*1000:.0f} mm | Matériau : {mat}
+🧮 Calcul vilebrequin :
+- Couple transmis = {C:.2f} Nm | L = {L:.0f} mm | Rayon excentrique = {r:.1f} mm
 - Résistance admissible τ = {tau_adm/1e6:.0f} MPa (sécurité {tol*100:.0f}%)
-- **Diamètre mini recommandé** : {d_min_mm:.1f} mm
-- Allongement sous torsion (info) : {np.degrees(theta):.3f}°
+- **Ø maneton mini recommandé** : {d_m:.1f} mm
+- **Ø paliers recommandé** : {d_p:.1f} mm
+- Largeur maneton : {b:.1f} mm
 """)
-            self.afficher_schema(d_min_mm, L*1000)
+            self.afficher_schema(d_p, d_m, L, r, b)
         except Exception as e:
             self.resultat.config(text=f"Erreur : {str(e)}")
             if self.canvas:
                 self.canvas.get_tk_widget().destroy()
                 self.canvas = None
 
-    def afficher_schema(self, d_mm, L_mm):
+    def afficher_schema(self, d_p, d_m, L, r, b):
         if self.canvas:
             self.canvas.get_tk_widget().destroy()
-        fig = Figure(figsize=(5,1.2), dpi=100)
+        import matplotlib.patches as mpatches
+        fig = Figure(figsize=(8, 2), dpi=100)
         ax = fig.add_subplot(111)
-        # Représentation simplifiée de l'arbre manivelle
-        ax.add_patch(plt.Rectangle((0, 0.4), L_mm, 0.2, color="#cccccc"))
-        ax.add_patch(plt.Circle((0, 0.5), d_mm/2, color="#8888ff", label="Palier gauche"))
-        ax.add_patch(plt.Circle((L_mm, 0.5), d_mm/2, color="#ff8888", label="Palier droit"))
-        ax.set_xlim(-d_mm, L_mm+d_mm)
-        ax.set_ylim(0, 1)
-        ax.set_axis_off()
-        ax.set_title("Schéma simplifié du vilebrequin (vue de dessus)")
+
+        # --- Dimensions des éléments principaux ---
+        largeur_palier = 16      # mm (ajustable)
+        largeur_bras = 12        # mm
+        largeur_maneton = b      # mm (entrée utilisateur)
+        espace_bras_maneton = 4  # mm pour visibilité
+
+        # Placement sur l'axe X (gauche à droite)
+        x0 = 0
+        x1 = x0 + largeur_palier
+        x2 = x1 + largeur_bras
+        x3 = x2 + espace_bras_maneton
+        x4 = x3 + largeur_maneton
+        x5 = x4 + espace_bras_maneton
+        x6 = x5 + largeur_bras
+        x7 = x6 + largeur_palier
+
+        # Centre du maneton (excentré de r)
+        y = 1.0
+
+        # Paliers gauche/droite
+        ax.add_patch(mpatches.Rectangle((x0, y - d_p/2), largeur_palier, d_p, color="#b6cef2", label="Palier gauche"))
+        ax.add_patch(mpatches.Rectangle((x6, y - d_p/2), largeur_palier, d_p, color="#b6cef2", label="Palier droit"))
+
+        # Bras de manivelle
+        ax.add_patch(mpatches.Rectangle((x1, y - d_p/2), largeur_bras, d_p, color="#aaaaaa", label="Bras"))
+        ax.add_patch(mpatches.Rectangle((x5, y - d_p/2), largeur_bras, d_p, color="#aaaaaa"))
+
+        # Maneton (excentré en Y de +r)
+        ax.add_patch(mpatches.Rectangle((x3, y + r - d_m/2), largeur_maneton, d_m, color="#ef767a", label="Maneton excentré"))
+
+        # Axe principal
+        ax.plot([x0, x7], [y, y], color="k", lw=2, linestyle="--", zorder=3)
+
+        # Axe du maneton (excentré)
+        x_centre_maneton = x3 + largeur_maneton / 2
+        ax.plot([x_centre_maneton, x_centre_maneton], [y, y + r], color="#222", lw=2, linestyle="-")
+        ax.plot([x3, x4], [y + r, y + r], color="#a33", lw=2, linestyle=":")
+
+        # Légendes
+        ax.text(x1 + largeur_bras/2, y + d_p/2 + 3, "Bras de manivelle", ha="center", color="#555")
+        ax.text(x3 + largeur_maneton/2, y + r + d_m/2 + 2, "Maneton (excentré)", ha="center", color="#a33")
+        ax.text(x0 + largeur_palier/2, y + d_p/2 + 2, "Palier", ha="center", color="#334")
+        ax.text(x6 + largeur_palier/2, y + d_p/2 + 2, "Palier", ha="center", color="#334")
+
+        # Ajuste la vue
+        ax.set_xlim(x0 - 10, x7 + 10)
+        ax.set_ylim(y - d_p, y + d_p * 2)
+        ax.axis("off")
+        ax.set_title("Croquis industriel du vilebrequin – vue de dessus")
+
         self.canvas = FigureCanvasTkAgg(fig, master=self)
         self.canvas.draw()
         self.canvas.get_tk_widget().pack(pady=5)
+
+
+
 
 
 # ----- Lancement -----
