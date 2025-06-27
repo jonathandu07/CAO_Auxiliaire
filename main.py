@@ -1,4 +1,6 @@
 import tkinter as tk
+import os
+from PIL import Image, ImageTk
 
 # Couleurs officielles (extraites de l'image)
 COULEURS = {
@@ -43,7 +45,11 @@ class AssistantCAO(tk.Tk):
         container = tk.Frame(self, bg=COULEURS["fond"])
         container.pack(fill="both", expand=True)
 
-        for F in (PageAccueil, PageCalculs, PageMateriaux, PageParametres):
+        for F in (
+            PageAccueil, PageCalculs, PageMateriaux, PageParametres,
+            PageMoteurStirling, PageDroneStructure, PageDronePropulsion,
+            PageDroneIA, PageSimulationMission
+        ):
             frame = F(parent=container, controller=self)
             self.frames[F] = frame
             frame.grid(row=0, column=0, sticky="nsew")
@@ -62,7 +68,9 @@ class PageAccueil(tk.Frame):
         # Logo de ta boîte (au-dessus du titre)
         logo_path = "JN-BWF.png"  # 🖼️ remplace par le chemin exact
         if os.path.exists(logo_path):
-            self.logo_image = tk.PhotoImage(file=logo_path)
+            image = Image.open(logo_path)
+            image = image.resize((128, 128), Image.LANCZOS)  # ou 64x64 selon le rendu souhaité
+            self.logo_image = ImageTk.PhotoImage(image)
             tk.Label(self, image=self.logo_image, bg=COULEURS["fond"]).pack(pady=(20, 10))
 
         # Titre de l'application
@@ -98,11 +106,30 @@ class PageCalculs(tk.Frame):
 class PageMateriaux(tk.Frame):
     def __init__(self, parent, controller):
         super().__init__(parent, bg=COULEURS["fond"])
+
         tk.Label(self, text="Base de données matériaux", bg=COULEURS["fond"],
                  fg=COULEURS["primaire"], font=("Segoe UI", 18, "bold")).pack(pady=20)
-        carte = carte_bento(self, "Acier", "E = 210 GPa\nLimite élastique = 235 MPa")
-        carte.pack(pady=20)
+
+        # Liste des matériaux clés
+        materiaux = [
+            ("Acier S235", "E = 210 GPa\nRe = 235 MPa\nρ = 7.85 g/cm³"),
+            ("Acier Inox 304", "E = 193 GPa\nRe = 215 MPa\nρ = 8.0 g/cm³"),
+            ("Aluminium 6061-T6", "E = 69 GPa\nRe = 276 MPa\nρ = 2.70 g/cm³"),
+            ("Titane Grade 5", "E = 114 GPa\nRe = 880 MPa\nρ = 4.43 g/cm³"),
+            ("ABS", "E = 2.1 GPa\nRe ≈ 40 MPa\nρ = 1.04 g/cm³"),
+            ("Nylon (PA)", "E = 2.5 GPa\nRe ≈ 70 MPa\nρ = 1.15 g/cm³"),
+            ("PEEK", "E = 3.6 GPa\nRe = 100 MPa\nρ = 1.3 g/cm³"),
+            ("Bakelite", "E ≈ 3.5 GPa\nRe ≈ 60 MPa\nρ = 1.3 g/cm³"),
+            ("Carbone époxy", "E = 70–135 GPa\nRe = 600+ MPa\nρ = 1.5 g/cm³"),
+            ("Cuivre", "E = 110 GPa\nRe = 70 MPa\nρ = 8.96 g/cm³")
+        ]
+
+        for nom, specs in materiaux:
+            carte = carte_bento(self, nom, specs)
+            carte.pack(pady=10)
+
         bouton_flat(self, "Retour", lambda: controller.afficher_page(PageAccueil)).pack(pady=20)
+
 
 class PageParametres(tk.Frame):
     def __init__(self, parent, controller):
@@ -112,6 +139,39 @@ class PageParametres(tk.Frame):
         carte = carte_bento(self, "Unités", "Longueur : mm\nForce : N\nModule : MPa")
         carte.pack(pady=20)
         bouton_flat(self, "Retour", lambda: controller.afficher_page(PageAccueil)).pack(pady=20)
+
+
+class PageMoteurStirling(tk.Frame):
+    def __init__(self, parent, controller):
+        super().__init__(parent, bg=COULEURS["fond"])
+        tk.Label(self, text="Moteur Stirling (à venir)", bg=COULEURS["fond"],
+                 fg=COULEURS["primaire"], font=("Segoe UI", 16)).pack(pady=30)
+
+class PageDroneStructure(tk.Frame):
+    def __init__(self, parent, controller):
+        super().__init__(parent, bg=COULEURS["fond"])
+        tk.Label(self, text="Structure du drone (à venir)", bg=COULEURS["fond"],
+                 fg=COULEURS["primaire"], font=("Segoe UI", 16)).pack(pady=30)
+
+class PageDronePropulsion(tk.Frame):
+    def __init__(self, parent, controller):
+        super().__init__(parent, bg=COULEURS["fond"])
+        tk.Label(self, text="Propulsion du drone (à venir)", bg=COULEURS["fond"],
+                 fg=COULEURS["primaire"], font=("Segoe UI", 16)).pack(pady=30)
+
+class PageDroneIA(tk.Frame):
+    def __init__(self, parent, controller):
+        super().__init__(parent, bg=COULEURS["fond"])
+        tk.Label(self, text="Électronique & IA du drone (à venir)", bg=COULEURS["fond"],
+                 fg=COULEURS["primaire"], font=("Segoe UI", 16)).pack(pady=30)
+
+class PageSimulationMission(tk.Frame):
+    def __init__(self, parent, controller):
+        super().__init__(parent, bg=COULEURS["fond"])
+        tk.Label(self, text="Simulation de mission (à venir)", bg=COULEURS["fond"],
+                 fg=COULEURS["primaire"], font=("Segoe UI", 16)).pack(pady=30)
+
+
 
 # ----- Lancement -----
 app = AssistantCAO()
