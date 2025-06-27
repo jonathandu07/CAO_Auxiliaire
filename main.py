@@ -54,6 +54,7 @@ class AssistantCAO(tk.Tk):
 
         self.configure(bg=COULEURS["fond"])
         self.frames = {}
+        self.memo_moteur_stirling = {}
 
         container = tk.Frame(self, bg=COULEURS["fond"])
         container.pack(fill="both", expand=True)
@@ -76,6 +77,12 @@ class AssistantCAO(tk.Tk):
             frame.grid(row=0, column=0, sticky="nsew")
 
         self.afficher_page(PageAccueil)
+
+    def afficher_page(self, page_class):
+        """Affiche la page demandée (classe) et masque les autres"""
+        frame = self.frames[page_class]
+        frame.tkraise()
+
 
 
 # ----- Pages -----
@@ -302,13 +309,22 @@ class PageMoteurStirling(tk.Frame):
         super().__init__(parent, bg=COULEURS["fond"])
         self.controller = controller
 
-        # --------- TITRE ---------
-        tk.Label(self, text="Conception du moteur Stirling",
+        # --------- CONTAINER 2 COLONNES ---------
+        container = tk.Frame(self, bg=COULEURS["fond"])
+        container.pack(fill="both", expand=True, padx=40, pady=10)
+        container.grid_columnconfigure(0, weight=2)
+        container.grid_columnconfigure(1, weight=1)
+
+        # --------- COLONNE GAUCHE : Formulaire + Résultats ---------
+        left_col = tk.Frame(container, bg=COULEURS["fond"])
+        left_col.grid(row=0, column=0, sticky="nw")
+
+        tk.Label(left_col, text="Conception du moteur Stirling",
                  bg=COULEURS["fond"], fg=COULEURS["primaire"],
                  font=("Segoe UI", 22, "bold")).pack(pady=(22, 10))
 
-        # --------- ZONE CHAMPS SAISIE ---------
-        form_zone = tk.Frame(self, bg=COULEURS["fond"])
+        # Formulaire
+        form_zone = tk.Frame(left_col, bg=COULEURS["fond"])
         form_zone.pack(pady=(0, 8))
 
         self.champs = {}
@@ -329,7 +345,7 @@ class PageMoteurStirling(tk.Frame):
             entry.grid(row=i, column=1, padx=6, pady=5)
             self.champs[cle] = entry
 
-        # --------- GAZ ---------
+        # Gaz
         f_gaz = tk.Frame(form_zone, bg=COULEURS["fond"])
         tk.Label(f_gaz, text="Gaz utilisé", font=("Segoe UI", 11), width=25, anchor="w",
                  bg=COULEURS["fond"], fg=COULEURS["texte"]).pack(side="left", padx=6)
@@ -339,22 +355,22 @@ class PageMoteurStirling(tk.Frame):
         menu.pack(side="left", padx=4)
         f_gaz.grid(row=len(donnees), column=0, columnspan=2, sticky="w", pady=8)
 
-        # --------- BOUTONS ---------
-        btns = tk.Frame(self, bg=COULEURS["fond"])
+        # Boutons
+        btns = tk.Frame(left_col, bg=COULEURS["fond"])
         btns.pack(pady=(5, 18))
         bouton_flat(btns, "Calculer le moteur", self.calculer).pack(side="left", padx=14)
         bouton_flat(btns, "Retour", lambda: controller.afficher_page(PageAccueil)).pack(side="left", padx=14)
 
-        # --------- RÉSULTATS ---------
-        self.card_resultat = tk.Frame(self, bg="#f4f7fb", bd=1, relief="solid")
-        self.card_resultat.pack(pady=(0, 8), padx=28, fill="x", expand=True)
+        # Résultats
+        self.card_resultat = tk.Frame(left_col, bg="#f4f7fb", bd=1, relief="solid")
+        self.card_resultat.pack(pady=(0, 8), padx=0, fill="x", expand=True)
         self.resultat = tk.Label(self.card_resultat, text="", bg="#f4f7fb", fg=COULEURS["accent"],
                                  font=("Consolas", 11), justify="left", anchor="w")
         self.resultat.pack(padx=16, pady=12, fill="both")
 
-        # --------- SCHEMA ---------
-        self.schema_zone = tk.Frame(self, bg=COULEURS["fond"])
-        self.schema_zone.pack(pady=(0, 10))
+        # --------- COLONNE DROITE : SCHEMA ---------
+        self.schema_zone = tk.Frame(container, bg=COULEURS["fond"])
+        self.schema_zone.grid(row=0, column=1, sticky="ne", padx=20)
         self.canvas = None
 
     def _materiau_recommande(self, T_chaude):
@@ -442,6 +458,14 @@ class PageMoteurStirling(tk.Frame):
             vilebrequin = course / 2
             couple = W / (2 * np.pi * f)
             rpm = f * 60
+
+            # Stockage des valeurs pour la boîte à crabots, APRÈS calcul
+            self.controller.memo_moteur_stirling = {
+                "rpm": rpm,
+                "vilebrequin": vilebrequin,
+                "couple": couple,
+                "d_cyl": d_cyl
+            }
 
             etat_surface = "Ra ≤ 0.4 µm"
             roulement = "Roulement à billes étanche, acier inox ou céramique"
@@ -553,6 +577,8 @@ class PageMoteurStirling(tk.Frame):
         self.canvas = FigureCanvasTkAgg(fig, master=self.schema_zone)
         self.canvas.draw()
         self.canvas.get_tk_widget().pack(pady=10)
+
+
 
 
 
@@ -903,6 +929,7 @@ class PageSimulationMission(tk.Frame):
 class PageBoiteCrabot(tk.Frame):
     def __init__(self, parent, controller):
         super().__init__(parent, bg=COULEURS["fond"])
+        self.controller = controller
 
         tk.Label(self, text="Conception boîte à crabots automatique", bg=COULEURS["fond"],
                  fg=COULEURS["primaire"], font=("Segoe UI", 18, "bold")).pack(pady=20)
@@ -925,6 +952,7 @@ class PageBoiteCrabot(tk.Frame):
             entry.grid(row=i, column=1, padx=10)
             self.champs[cle] = entry
 
+        bouton_flat(self, "Charger depuis moteur Stirling", self.charger_depuis_stirling).pack(pady=5)
         bouton_flat(self, "Calculer", self.calculer).pack(pady=15)
 
         self.resultat = tk.Label(self, text="", bg=COULEURS["fond"],
@@ -933,12 +961,56 @@ class PageBoiteCrabot(tk.Frame):
 
         bouton_flat(self, "Retour", lambda: controller.afficher_page(PageAccueil)).pack(pady=10)
 
+    def charger_depuis_stirling(self):
+        """Pré-remplit les champs avec les valeurs du moteur Stirling s'ils existent."""
+        data = self.controller.memo_moteur_stirling if hasattr(self.controller, "memo_moteur_stirling") else {}
+
+        if data:
+            if data.get("rpm"):
+                self.champs["v_in"].delete(0, tk.END)
+                self.champs["v_in"].insert(0, f"{data['rpm']:.0f}")
+            if data.get("vilebrequin"):
+                self.champs["d_arbre"].delete(0, tk.END)
+                self.champs["d_arbre"].insert(0, f"{data['vilebrequin']:.2f}")
+            # Tu peux aussi pré-remplir "module" si tu le veux (par défaut à 2)
+            self.champs["module"].delete(0, tk.END)
+            self.champs["module"].insert(0, "2.0")
+            # Nb rapports : valeur par défaut 4
+            self.champs["nb_rapports"].delete(0, tk.END)
+            self.champs["nb_rapports"].insert(0, "4")
+            self.resultat.config(text="Valeurs importées du moteur Stirling.")
+        else:
+            self.resultat.config(text="Aucune donnée moteur Stirling disponible.")
+
     def calculer(self):
+        # Déduction intelligente :
         try:
+            v_in = self.champs["v_in"].get()
+            n = self.champs["nb_rapports"].get()
+            d = self.champs["d_arbre"].get()
+            m = self.champs["module"].get()
+
+            # Remplissage automatique si possible
+            if not v_in:
+                data = self.controller.memo_moteur_stirling if hasattr(self.controller, "memo_moteur_stirling") else {}
+                v_in = data.get("rpm", 1500)
+                self.champs["v_in"].insert(0, str(int(v_in)))
+            if not n:
+                n = 4
+                self.champs["nb_rapports"].insert(0, "4")
+            if not d:
+                data = self.controller.memo_moteur_stirling if hasattr(self.controller, "memo_moteur_stirling") else {}
+                d = data.get("vilebrequin", 20)
+                self.champs["d_arbre"].insert(0, f"{float(d):.2f}")
+            if not m:
+                m = 2.0
+                self.champs["module"].insert(0, "2.0")
+
             v_in = float(self.champs["v_in"].get())
             n = int(self.champs["nb_rapports"].get())
             d = float(self.champs["d_arbre"].get())
             m = float(self.champs["module"].get())
+
         except ValueError:
             self.resultat.config(text="⚠️ Vérifie les entrées.")
             return
@@ -947,19 +1019,21 @@ class PageBoiteCrabot(tk.Frame):
         vitesses = []
         for i in range(1, n + 1):
             z1 = 20
-            z2 = z1 * (1 + i * 0.2)  # rapport progressif
+            z2 = int(z1 * (1 + i * 0.25))  # rapport progressif, un peu plus étagé
             r = z2 / z1
             v_out = v_in / r
-            rapports.append(f"Rapport {i} : {r:.2f}")
+            rapports.append(f"Rapport {i} : {z1} / {z2} = {r:.2f}")
             vitesses.append(f"Vitesse sortie {i} : {v_out:.1f} tr/min")
 
-        entraxe = m * (20 + 40) / 2 / 1000  # mm en m
-        resultats = "\n".join(rapports + vitesses)
+        entraxe = m * (20 + z2) / 2 / 1000  # mm en m
+        resultats = "Données déduites automatiquement si besoin.\n\n"
+        resultats += "\n".join(rapports + vitesses)
         resultats += f"\n\nDiamètre d’arbre : {d} mm"
         resultats += f"\nModule choisi : {m} mm"
         resultats += f"\nEntraxe estimé : {entraxe:.3f} m"
 
         self.resultat.config(text=resultats)
+
         
 
 class PagePistonStirling(tk.Frame):
