@@ -70,7 +70,8 @@ class AssistantCAO(tk.Tk):
             PageDronePropulsion,
             PageDroneIA,
             PageSimulationMission,
-            PageBoiteCrabot
+            PageBoiteCrabot,
+            PageVilebrequin,
         ):
             frame = F(parent=container, controller=self)
             self.frames[F] = frame
@@ -114,6 +115,7 @@ class PageAccueil(tk.Frame):
             ("Simulation de mission", PageSimulationMission),
             ("Boîte à crabots automatique", PageBoiteCrabot),
             ("Conception piston Stirling (galette)", PagePistonStirling),
+            ("Dimensionnement vilebrequin", PageVilebrequin),
         ]
 
         for txt, page in boutons:
@@ -1128,6 +1130,107 @@ Matériau conseillé : {mat_piston}
 """)
         except Exception as e:
             self.resultat.config(text=f"Erreur : {str(e)}")
+
+
+class PageVilebrequin(tk.Frame):
+    def __init__(self, parent, controller):
+        super().__init__(parent, bg=COULEURS["fond"])
+        self.controller = controller
+
+        tk.Label(self, text="Dimensionnement du vilebrequin", bg=COULEURS["fond"],
+                 fg=COULEURS["primaire"], font=("Segoe UI", 18, "bold")).pack(pady=20)
+
+        form = tk.Frame(self, bg=COULEURS["fond"])
+        form.pack(pady=10)
+
+        # Entrées principales
+        self.puissance = self._champ(form, "Puissance transmise (W)", 0)
+        self.vitesse = self._champ(form, "Vitesse de rotation (tr/min)", 1)
+        self.couple = self._champ(form, "Couple transmis (Nm)", 2)
+        self.longueur = self._champ(form, "Longueur arbre (mm)", 3, default="80")
+        self.tol = self._champ(form, "Tolérance sécurité (%)", 4, default="20")
+
+        # Matériau
+        tk.Label(form, text="Matériau", bg=COULEURS["fond"], fg=COULEURS["texte"]).grid(row=5, column=0, sticky="w", padx=10, pady=5)
+        self.mat_var = tk.StringVar(value="Acier S235")
+        tk.OptionMenu(form, self.mat_var, *MATERIAUX.keys()).grid(row=5, column=1, padx=10)
+
+        bouton_flat(self, "Calculer vilebrequin", self.calculer).pack(pady=10)
+        self.resultat = tk.Label(self, text="", bg=COULEURS["fond"], fg=COULEURS["accent"], font=("Consolas", 10), justify="left")
+        self.resultat.pack(pady=10)
+
+        # Schéma matplotlib
+        self.canvas = None
+
+        bouton_flat(self, "Retour", lambda: controller.afficher_page(PageAccueil)).pack(pady=15)
+
+    def _champ(self, parent, label, row, default=""):
+        tk.Label(parent, text=label, bg=COULEURS["fond"], fg=COULEURS["texte"],
+                 font=("Segoe UI", 10), width=30, anchor="w").grid(row=row, column=0, padx=10, pady=5)
+        e = tk.Entry(parent, font=("Segoe UI", 10), width=15)
+        e.insert(0, default)
+        e.grid(row=row, column=1, padx=10)
+        return e
+
+    def calculer(self):
+        try:
+            # Récupère valeurs
+            W = float(self.puissance.get()) if self.puissance.get() else None
+            N = float(self.vitesse.get()) if self.vitesse.get() else None
+            C = float(self.couple.get()) if self.couple.get() else None
+            L = float(self.longueur.get()) / 1000      # mm -> m
+            tol = float(self.tol.get()) / 100
+            mat = self.mat_var.get()
+            Re = MATERIAUX[mat]["Re"] * 1e6 if "Re" in MATERIAUX[mat] else 250e6 # MPa -> Pa
+
+            # Si couple absent, calcule à partir de puissance & vitesse
+            if not C:
+                if W is not None and N is not None:
+                    C = W / (2 * np.pi * (N/60))
+                else:
+                    raise ValueError("Donne au moins la puissance+vitesse ou le couple transmis.")
+
+            # Coeff de sécurité intégré à Re
+            Re_adm = (1-tol) * Re
+            tau_adm = 0.6 * Re_adm   # cisaillement admissible, conventionnel (60% de la Re)
+
+            # Diamètre mini sous torsion pure : d = [(16*C)/(π*tau_adm)]^(1/3)
+            d_min = ((16*C) / (np.pi * tau_adm))**(1/3)
+            d_min_mm = d_min * 1000
+
+            # Allongement sous torsion, pour info
+            G = MATERIAUX[mat]["E"] * 1e9 / (2*(1+0.3))  # Module de Young à module de cisaillement (G = E/2(1+ν)), ν~0.3
+            theta = C * L / (G * (np.pi/32) * d_min**4)  # rad
+
+            self.resultat.config(text=f"""
+🧮 Calcul pour : Couple = {C:.2f} Nm | L = {L*1000:.0f} mm | Matériau : {mat}
+- Résistance admissible τ = {tau_adm/1e6:.0f} MPa (sécurité {tol*100:.0f}%)
+- **Diamètre mini recommandé** : {d_min_mm:.1f} mm
+- Allongement sous torsion (info) : {np.degrees(theta):.3f}°
+""")
+            self.afficher_schema(d_min_mm, L*1000)
+        except Exception as e:
+            self.resultat.config(text=f"Erreur : {str(e)}")
+            if self.canvas:
+                self.canvas.get_tk_widget().destroy()
+                self.canvas = None
+
+    def afficher_schema(self, d_mm, L_mm):
+        if self.canvas:
+            self.canvas.get_tk_widget().destroy()
+        fig = Figure(figsize=(5,1.2), dpi=100)
+        ax = fig.add_subplot(111)
+        # Représentation simplifiée de l'arbre manivelle
+        ax.add_patch(plt.Rectangle((0, 0.4), L_mm, 0.2, color="#cccccc"))
+        ax.add_patch(plt.Circle((0, 0.5), d_mm/2, color="#8888ff", label="Palier gauche"))
+        ax.add_patch(plt.Circle((L_mm, 0.5), d_mm/2, color="#ff8888", label="Palier droit"))
+        ax.set_xlim(-d_mm, L_mm+d_mm)
+        ax.set_ylim(0, 1)
+        ax.set_axis_off()
+        ax.set_title("Schéma simplifié du vilebrequin (vue de dessus)")
+        self.canvas = FigureCanvasTkAgg(fig, master=self)
+        self.canvas.draw()
+        self.canvas.get_tk_widget().pack(pady=5)
 
 
 # ----- Lancement -----
