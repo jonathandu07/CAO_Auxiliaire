@@ -12,13 +12,17 @@ import matplotlib.pyplot as plt
 
 # Couleurs officielles (extraites de l'image)
 COULEURS = {
-    "fond": "#F4FEFE",         # Blanc-Lunaire
-    "primaire": "#051440",     # Bleu-France
-    "accent": "#0A0B0A",       # Jaune-Vatican
-    "texte": "#1E1E1E",        # Noir-Figma
-    "bouton": "#303030",       # Anthracite
-    "hover": "#3E5349",        # Natural-Green (pour effet hover)
-    "bordure": "#D9D9D9",      # Gris Figma
+    "fond": "#F4FEFE",         # Blanc-Lunaire (fond général)
+    "primaire": "#051440",     # Bleu-France (titre principal, éléments forts)
+    "accent": "#FFC600",       # Jaune-Vatican (élément accent, surlignage)
+    "texte": "#1E1E1E",        # Noir-Figma (texte principal)
+    "bouton": "#303030",       # Anthracite (boutons principaux)
+    "hover": "#3E5349",        # Natural-Green (survol bouton, hover)
+    "bordure": "#D9D9D9",      # Gris Figma (bordures, séparateurs)
+    # Bonus si besoin pour variantes secondaires :
+    "rouge": "#EC1920",        # Rouge-France
+    "jaune_blé": "#E8D630",    # Jaune-Blé (pour warnings)
+    "bleu_web": "#091226",     # Bleu-France-Web
 }
 
 # ----- Fonctions de style -----
@@ -72,6 +76,7 @@ class AssistantCAO(tk.Tk):
             PageSimulationMission,
             PageBoiteCrabot,
             PageVilebrequin,
+            PageDimensionnementStirling,
         ):
             frame = F(parent=container, controller=self)
             self.frames[F] = frame
@@ -115,6 +120,7 @@ class PageAccueil(tk.Frame):
             ("Simulation de mission", PageSimulationMission),
             ("Boîte à crabots automatique", PageBoiteCrabot),
             ("Conception piston Stirling (galette)", PagePistonStirling),
+            ("Dimensionnement vilebrequin", PageVilebrequin),
             ("Dimensionnement vilebrequin", PageVilebrequin),
         ]
 
@@ -524,19 +530,19 @@ Production annuelle continue : {production_annuelle:.1f} kWh/an
         legend_handles = []
 
         # Zone morte bas
-        zb = mpatches.Rectangle((0, y), d_cyl, zone_morte, color="#d6d6d6", label="Zone morte (bas)")
+        zb = mpatches.Rectangle((0, y), d_cyl, zone_morte, color=COULEURS["bordure"], label="Zone morte (bas)")
         ax.add_patch(zb)
         legend_handles.append(zb)
         y += zone_morte
 
         # Volume utile gaz
-        vg = mpatches.Rectangle((0, y), d_cyl, h_utile, color="#b9edc8", label="Volume utile gaz")
+        vg = mpatches.Rectangle((0, y), d_cyl, h_utile, color=COULEURS["hover"], label="Volume utile gaz")
         ax.add_patch(vg)
         legend_handles.append(vg)
         y += h_utile
 
         # Galette/piston
-        ps = mpatches.Rectangle((0, y), d_cyl, e_piston, color="#ffe37a", label="Galette/piston")
+        ps = mpatches.Rectangle((0, y), d_cyl, e_piston, color=COULEURS["accent"], label="Galette/piston")
         ax.add_patch(ps)
         legend_handles.append(ps)
         y += e_piston
@@ -1283,11 +1289,12 @@ class PageDimensionnementStirling(tk.Frame):
 
         # --------- FORMULAIRE ---------
         left_col = tk.Frame(self, bg=COULEURS["fond"])
-        left_col.pack(side="left", fill="both", expand=True, padx=32, pady=18)
+        left_col.grid(row=0, column=0, sticky="nsew", padx=32, pady=18)
 
-        tk.Label(left_col, text="Dimensionnement moteur Stirling – Outil ultime",
-                 bg=COULEURS["fond"], fg=COULEURS["primaire"],
-                 font=("Segoe UI", 21, "bold")).pack(pady=(12, 10))
+        titre = tk.Label(left_col, text="Dimensionnement moteur Stirling – Outil ultime",
+                         bg=COULEURS["fond"], fg=COULEURS["primaire"],
+                         font=("Segoe UI", 21, "bold"))
+        titre.grid(row=0, column=0, columnspan=2, pady=(12, 10))
 
         # Données d'entrée
         self.champs = {}
@@ -1307,30 +1314,30 @@ class PageDimensionnementStirling(tk.Frame):
         for i, (label, cle, default) in enumerate(donnees):
             l = tk.Label(left_col, text=label, font=("Segoe UI", 11), width=26, anchor="w",
                          bg=COULEURS["fond"], fg=COULEURS["texte"])
-            l.grid(row=i, column=0, sticky="w", padx=6, pady=5)
+            l.grid(row=i+1, column=0, sticky="w", padx=6, pady=5)
             if cle == "gaz":
                 var = tk.StringVar(value=default)
                 menu = tk.OptionMenu(left_col, var, "Air", "Hélium", "Hydrogène", "Azote")
                 menu.config(bg=COULEURS["fond"], fg=COULEURS["texte"], font=("Segoe UI", 11), highlightthickness=0)
-                menu.grid(row=i, column=1, padx=6, pady=5)
+                menu.grid(row=i+1, column=1, padx=6, pady=5)
                 self.champs[cle] = var
             else:
                 entry = tk.Entry(left_col, width=13, font=("Segoe UI", 11))
                 if default:
                     entry.insert(0, default)
-                entry.grid(row=i, column=1, padx=6, pady=5)
+                entry.grid(row=i+1, column=1, padx=6, pady=5)
                 self.champs[cle] = entry
 
         # Boutons
         btns = tk.Frame(left_col, bg=COULEURS["fond"])
-        btns.grid(row=len(donnees), column=0, columnspan=2, pady=(10, 20))
+        btns.grid(row=len(donnees)+2, column=0, columnspan=2, pady=(10, 20))
         bouton_flat(btns, "Calculer", self.calculer).pack(side="left", padx=14)
         bouton_flat(btns, "Retour", lambda: controller.afficher_page(PageAccueil)).pack(side="left", padx=14)
 
         # Résultats
         self.resultat = tk.Label(left_col, text="", bg="#f4f7fb", fg=COULEURS["accent"],
                                  font=("Consolas", 11), justify="left", anchor="w", width=64)
-        self.resultat.grid(row=len(donnees)+1, column=0, columnspan=2, sticky="w", padx=2, pady=(2, 8))
+        self.resultat.grid(row=len(donnees)+3, column=0, columnspan=2, sticky="w", padx=2, pady=(2, 8))
 
     def calculer(self):
         try:
@@ -1438,7 +1445,6 @@ class PageDimensionnementStirling(tk.Frame):
 
         except Exception as e:
             self.resultat.config(text=f"Erreur : {str(e)}")
-
 
 # ----- Lancement -----
 app = AssistantCAO()
