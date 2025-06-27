@@ -58,16 +58,33 @@ class AssistantCAO(tk.Tk):
 class PageAccueil(tk.Frame):
     def __init__(self, parent, controller):
         super().__init__(parent, bg=COULEURS["fond"])
-        tk.Label(self, text="Bienvenue dans l'Assistant de CAO", bg=COULEURS["fond"],
-                 fg=COULEURS["primaire"], font=("Segoe UI", 20, "bold")).pack(pady=20)
 
-        btns = [
-            ("Calculs RDM", lambda: controller.afficher_page(PageCalculs)),
-            ("Matériaux", lambda: controller.afficher_page(PageMateriaux)),
-            ("Paramètres", lambda: controller.afficher_page(PageParametres)),
+        # Logo de ta boîte (au-dessus du titre)
+        logo_path = "JN-BWF.png"  # 🖼️ remplace par le chemin exact
+        if os.path.exists(logo_path):
+            self.logo_image = tk.PhotoImage(file=logo_path)
+            tk.Label(self, image=self.logo_image, bg=COULEURS["fond"]).pack(pady=(20, 10))
+
+        # Titre de l'application
+        tk.Label(self, text="Assistant de CAO", bg=COULEURS["fond"],
+                 fg=COULEURS["primaire"], font=("Segoe UI", 20, "bold")).pack(pady=(0, 20))
+
+        # Boutons uniquement en texte
+        boutons = [
+            ("Calculs RDM", PageCalculs),
+            ("Matériaux", PageMateriaux),
+            ("Paramètres", PageParametres),
+            ("Conception moteur Stirling", PageMoteurStirling),
+            ("Structure du drone", PageDroneStructure),
+            ("Propulsion du drone", PageDronePropulsion),
+            ("Électronique & IA du drone", PageDroneIA),
+            ("Simulation de mission", PageSimulationMission)
         ]
-        for txt, cmd in btns:
-            bouton_flat(self, txt, cmd).pack(pady=10)
+
+        for txt, page in boutons:
+            b = bouton_flat(self, txt, lambda p=page: controller.afficher_page(p))
+            b.pack(pady=5)
+
 
 class PageCalculs(tk.Frame):
     def __init__(self, parent, controller):
