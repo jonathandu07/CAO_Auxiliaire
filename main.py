@@ -5,12 +5,10 @@ from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import numpy as np
 from mpl_toolkits.basemap import Basemap
-from matplotlib.figure import Figure
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-import numpy as np
 from materiaux import MATERIAUX
 import math
 import pandas as pd
+import matplotlib.pyplot as plt
 
 # Couleurs officielles (extraites de l'image)
 COULEURS = {
@@ -48,7 +46,12 @@ class AssistantCAO(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Assistant de CAO")
-        self.geometry("900x600")
+        # ---- Met en plein écran natif ----
+        self.attributes('-fullscreen', True)
+        # ---- Si tu veux une touche pour quitter le plein écran (ex: F11) ----
+        self.bind("<F11>", lambda e: self.attributes('-fullscreen', not self.attributes('-fullscreen')))
+        self.bind("<Escape>", lambda e: self.attributes('-fullscreen', False))
+
         self.configure(bg=COULEURS["fond"])
         self.frames = {}
 
@@ -61,6 +64,7 @@ class AssistantCAO(tk.Tk):
             PageMateriaux,
             PageParametres,
             PageMoteurStirling,
+            PagePistonStirling,
             PageDroneStructure,
             PageDronePropulsion,
             PageDroneIA,
@@ -73,9 +77,6 @@ class AssistantCAO(tk.Tk):
 
         self.afficher_page(PageAccueil)
 
-    def afficher_page(self, page_class):
-        frame = self.frames[page_class]
-        frame.tkraise()
 
 # ----- Pages -----
 class PageAccueil(tk.Frame):
@@ -104,7 +105,8 @@ class PageAccueil(tk.Frame):
             ("Propulsion du drone", PageDronePropulsion),
             ("Électronique & IA du drone", PageDroneIA),
             ("Simulation de mission", PageSimulationMission),
-            ("Boîte à crabots automatique", PageBoiteCrabot)
+            ("Boîte à crabots automatique", PageBoiteCrabot),
+            ("Conception piston Stirling (galette)", PagePistonStirling),
         ]
 
         for txt, page in boutons:
@@ -294,12 +296,20 @@ class PageParametres(tk.Frame):
         bouton_flat(self, "Retour", lambda: controller.afficher_page(PageAccueil)).pack(pady=20)
 
 
+
 class PageMoteurStirling(tk.Frame):
     def __init__(self, parent, controller):
         super().__init__(parent, bg=COULEURS["fond"])
+        self.controller = controller
 
-        tk.Label(self, text="Conception du moteur Stirling", bg=COULEURS["fond"],
-                 fg=COULEURS["primaire"], font=("Segoe UI", 18, "bold")).pack(pady=20)
+        # --------- TITRE ---------
+        tk.Label(self, text="Conception du moteur Stirling",
+                 bg=COULEURS["fond"], fg=COULEURS["primaire"],
+                 font=("Segoe UI", 22, "bold")).pack(pady=(22, 10))
+
+        # --------- ZONE CHAMPS SAISIE ---------
+        form_zone = tk.Frame(self, bg=COULEURS["fond"])
+        form_zone.pack(pady=(0, 8))
 
         self.champs = {}
         donnees = [
@@ -307,64 +317,97 @@ class PageMoteurStirling(tk.Frame):
             ("Température chaude (°C)", "t_chaude"),
             ("Température froide (°C)", "t_froide"),
             ("Pression moyenne (bar)", "pression"),
-            ("Fréquence de fonctionnement (Hz)", "freq")
+            ("Fréquence de fonctionnement (Hz)", "freq"),
+            ("Diamètre du cylindre (mm)", "d_cyl"),
+            ("Nombre de joints piston", "nb_joints")
         ]
-        for label, cle in donnees:
-            f = tk.Frame(self, bg=COULEURS["fond"])
-            tk.Label(f, text=label, font=("Segoe UI", 10), width=30, anchor="w",
-                     bg=COULEURS["fond"], fg=COULEURS["texte"]).pack(side="left")
-            entry = tk.Entry(f, width=15, font=("Segoe UI", 10))
-            entry.pack(side="right")
-            f.pack(pady=5)
+        for i, (label, cle) in enumerate(donnees):
+            l = tk.Label(form_zone, text=label, font=("Segoe UI", 11), width=25, anchor="w",
+                         bg=COULEURS["fond"], fg=COULEURS["texte"])
+            l.grid(row=i, column=0, sticky="w", padx=6, pady=5)
+            entry = tk.Entry(form_zone, width=14, font=("Segoe UI", 11))
+            entry.grid(row=i, column=1, padx=6, pady=5)
             self.champs[cle] = entry
 
-        # Choix du gaz
-        f_gaz = tk.Frame(self, bg=COULEURS["fond"])
-        tk.Label(f_gaz, text="Gaz utilisé", font=("Segoe UI", 10), width=30, anchor="w",
-                 bg=COULEURS["fond"], fg=COULEURS["texte"]).pack(side="left")
+        # --------- GAZ ---------
+        f_gaz = tk.Frame(form_zone, bg=COULEURS["fond"])
+        tk.Label(f_gaz, text="Gaz utilisé", font=("Segoe UI", 11), width=25, anchor="w",
+                 bg=COULEURS["fond"], fg=COULEURS["texte"]).pack(side="left", padx=6)
         self.gaz_var = tk.StringVar(value="Air")
         menu = tk.OptionMenu(f_gaz, self.gaz_var, "Air", "Hélium", "Hydrogène", "Azote")
-        menu.config(bg=COULEURS["fond"], fg=COULEURS["texte"], font=("Segoe UI", 10), highlightthickness=0)
-        menu.pack(side="right")
-        f_gaz.pack(pady=5)
+        menu.config(bg=COULEURS["fond"], fg=COULEURS["texte"], font=("Segoe UI", 11), highlightthickness=0)
+        menu.pack(side="left", padx=4)
+        f_gaz.grid(row=len(donnees), column=0, columnspan=2, sticky="w", pady=8)
 
-        # Résultat
-        self.resultat = tk.Label(self, text="", bg=COULEURS["fond"], fg=COULEURS["accent"],
-                                 font=("Segoe UI", 10), justify="left")
-        self.resultat.pack(pady=10)
+        # --------- BOUTONS ---------
+        btns = tk.Frame(self, bg=COULEURS["fond"])
+        btns.pack(pady=(5, 18))
+        bouton_flat(btns, "Calculer le moteur", self.calculer).pack(side="left", padx=14)
+        bouton_flat(btns, "Retour", lambda: controller.afficher_page(PageAccueil)).pack(side="left", padx=14)
 
-        # Boutons
-        bouton_flat(self, "Calculer le moteur", self.calculer).pack(pady=10)
-        bouton_flat(self, "Retour", lambda: controller.afficher_page(PageAccueil)).pack(pady=10)
+        # --------- RÉSULTATS ---------
+        self.card_resultat = tk.Frame(self, bg="#f4f7fb", bd=1, relief="solid")
+        self.card_resultat.pack(pady=(0, 8), padx=28, fill="x", expand=True)
+        self.resultat = tk.Label(self.card_resultat, text="", bg="#f4f7fb", fg=COULEURS["accent"],
+                                 font=("Consolas", 11), justify="left", anchor="w")
+        self.resultat.pack(padx=16, pady=12, fill="both")
+
+        # --------- SCHEMA ---------
+        self.schema_zone = tk.Frame(self, bg=COULEURS["fond"])
+        self.schema_zone.pack(pady=(0, 10))
+        self.canvas = None
+
+    def _materiau_recommande(self, T_chaude):
+        if T_chaude < 200:
+            return "Acier S235 ou C45 (usage standard, bonne usinabilité)"
+        elif T_chaude < 400:
+            return "Acier allié ou fonte GS (meilleure résistance à la chaleur)"
+        elif T_chaude < 650:
+            return "Acier inox 304/316L ou fonte GS (usage courant moteurs Stirling)"
+        elif T_chaude < 900:
+            return "Inox réfractaire (310S/253MA), Inconel 600, ou acier réfractaire"
+        else:
+            return "Inconel 718 / Superalliages Ni-Cr (usage très haute température, applications spéciales)"
 
     def calculer(self):
         try:
-            # Valeurs par défaut ingénieur
+            # Valeurs par défaut ingénieur/proto
             defval = {
-                "puissance": 1000,      # W
-                "t_chaude": 650,        # °C
-                "t_froide": 40,         # °C
-                "pression": 20,         # bar
-                "freq": 30              # Hz
+                "puissance": 1000,
+                "t_chaude": 650,
+                "t_froide": 40,
+                "pression": 20,
+                "freq": 30,
+                "d_cyl": None,
+                "nb_joints": 2
             }
-            # Récupère ou complète les champs
             def getval(champ):
                 txt = self.champs[champ].get()
-                return float(txt) if txt else defval[champ]
+                if not txt and champ != "d_cyl":
+                    return float(defval[champ])
+                if champ == "d_cyl" and not txt:
+                    return None
+                if champ == "nb_joints" and not txt:
+                    return int(defval[champ])
+                return float(txt) if champ != "nb_joints" else int(txt)
 
             W = getval("puissance")
-            T_hot = getval("t_chaude") + 273.15
+            T_hot_C = getval("t_chaude")
+            T_hot = T_hot_C + 273.15
             T_cold = getval("t_froide") + 273.15
             P_bar = getval("pression")
             f = getval("freq")
+            d_cyl_user = getval("d_cyl")
+            nb_joints = getval("nb_joints")
             gaz = self.gaz_var.get()
 
-            rendement = 0.35  # réaliste (35% du rendement de Carnot)
+            # Matériau recommandé
+            materiau = self._materiau_recommande(T_hot_C)
+
+            rendement = 0.35
             delta_T = T_hot - T_cold
             eta_carnot = delta_T / T_hot
             eta_total = eta_carnot * rendement
-
-            # Protection contre les divisions par zéro (ex : T_hot == T_cold)
             if eta_total < 0.01:
                 raise ValueError("Différence de température trop faible pour calculer un moteur réaliste.")
 
@@ -372,10 +415,30 @@ class PageMoteurStirling(tk.Frame):
             P_Pa = P_bar * 1e5
             V_tot = energie_cycle / (P_Pa * delta_T / T_hot)  # m³
 
-            # Calcul des dimensions caractéristiques (exemple type)
-            d_cyl = (4 * V_tot * 1e6 / (np.pi * 30)) ** (1 / 3)     # mm
-            h_cyl = 1.2 * d_cyl
-            course = h_cyl / 2
+            # Géométrie (tout en mm)
+            if d_cyl_user:
+                d_cyl = d_cyl_user
+                A_cyl = np.pi * (d_cyl / 2) ** 2  # mm²
+                h_cyl_utile = (V_tot * 1e9) / A_cyl  # mm (utile)
+            else:
+                d_cyl = (4 * V_tot * 1e9 / (np.pi * 1.5)) ** (1/3)  # mm
+                A_cyl = np.pi * (d_cyl / 2) ** 2
+                h_cyl_utile = (V_tot * 1e9) / A_cyl  # mm
+
+            # Prise en compte de tous les éléments mécaniques
+            e_piston = max(0.22 * d_cyl, 10)  # Galette : 22% du diamètre, min 10mm
+            e_joint = 2.5  # mm par joint (classique Viton/graphite)
+            zone_morte = 0.08 * h_cyl_utile  # 8% de zone morte (haut+bas)
+            jeu_fonctionnement = 0.018 * h_cyl_utile  # 1.8% de jeu sur la hauteur
+
+            h_cyl_total = (
+                h_cyl_utile
+                + e_piston
+                + nb_joints * e_joint
+                + 2 * zone_morte
+                + jeu_fonctionnement
+            )
+            course = h_cyl_utile / 2
             vilebrequin = course / 2
             couple = W / (2 * np.pi * f)
             rpm = f * 60
@@ -385,7 +448,10 @@ class PageMoteurStirling(tk.Frame):
 
             auto_txt = []
             for champ, val in defval.items():
-                if not self.champs[champ].get():
+                if champ == "d_cyl":
+                    if not self.champs[champ].get():
+                        auto_txt.append("Diamètre cylindre → calculé")
+                elif not self.champs[champ].get():
                     auto_txt.append(f"{champ.replace('_',' ').capitalize()} → {val}")
 
             txtauto = ""
@@ -396,7 +462,9 @@ class PageMoteurStirling(tk.Frame):
 🔧 Résultats pour {W:.0f} W avec gaz = {gaz} :
 - Volume total : {V_tot*1e6:.2f} cm³
 - Diamètre du cylindre : {d_cyl:.2f} mm
-- Hauteur du cylindre : {h_cyl:.2f} mm
+- Hauteur utile (calcul) : {h_cyl_utile:.2f} mm
+- Hauteur totale usinée (conception) : {h_cyl_total:.2f} mm
+  (piston ép. {e_piston:.1f} mm, {nb_joints} joints × {e_joint:.1f} mm, zones mortes {zone_morte:.2f} mm, jeu {jeu_fonctionnement:.2f} mm)
 - Course du piston : {course:.2f} mm
 - Longueur du vilebrequin : {vilebrequin:.2f} mm
 - Couple attendu : {couple:.2f} Nm
@@ -404,10 +472,87 @@ class PageMoteurStirling(tk.Frame):
 
 🛠️ État de surface : {etat_surface}
 ⚙️ Type de roulement : {roulement}
+🧱 Matériau recommandé (cylindre) : {materiau}
 """)
+
+            # ---- SCHEMA CAO (coupe longitudinale stylisée) ----
+            self.afficher_schema(d_cyl, h_cyl_utile, e_piston, nb_joints, e_joint,
+                                zone_morte, jeu_fonctionnement, h_cyl_total)
+
         except Exception as e:
             self.resultat.config(text=f"Erreur : {str(e)}")
 
+    def afficher_schema(self, d_cyl, h_utile, e_piston, nb_joints, e_joint,
+                       zone_morte, jeu, h_cyl_total):
+        if self.canvas:
+            self.canvas.get_tk_widget().destroy()
+            self.canvas = None
+
+        import matplotlib.patches as mpatches
+
+        fig = Figure(figsize=(5.5, 2.5), dpi=100)
+        ax = fig.add_subplot(111)
+        ax.set_title("Coupe longitudinale du cylindre", fontsize=12)
+
+        # Affichage stylisé du cylindre
+        # Repères verticaux : 0 en bas, tout monte (y)
+        y = 0
+        legend_handles = []
+
+        # Zone morte bas
+        zb = mpatches.Rectangle((0, y), d_cyl, zone_morte, color="#d6d6d6", label="Zone morte (bas)")
+        ax.add_patch(zb)
+        legend_handles.append(zb)
+        y += zone_morte
+
+        # Volume utile gaz
+        vg = mpatches.Rectangle((0, y), d_cyl, h_utile, color="#b9edc8", label="Volume utile gaz")
+        ax.add_patch(vg)
+        legend_handles.append(vg)
+        y += h_utile
+
+        # Galette/piston
+        ps = mpatches.Rectangle((0, y), d_cyl, e_piston, color="#ffe37a", label="Galette/piston")
+        ax.add_patch(ps)
+        legend_handles.append(ps)
+        y += e_piston
+
+        # Joints piston
+        for i in range(nb_joints):
+            jt = mpatches.Rectangle((0, y), d_cyl, e_joint, color="#ffbe76", label="Joint" if i == 0 else "")
+            ax.add_patch(jt)
+            if i == 0:
+                legend_handles.append(jt)
+            y += e_joint
+
+        # Zone morte haut
+        zh = mpatches.Rectangle((0, y), d_cyl, zone_morte, color="#d6d6d6", label="Zone morte (haut)")
+        ax.add_patch(zh)
+        legend_handles.append(zh)
+        y += zone_morte
+
+        # Jeu
+        j = mpatches.Rectangle((0, y), d_cyl, jeu, color="#ececec", label="Jeu (usinage)")
+        ax.add_patch(j)
+        legend_handles.append(j)
+        y += jeu
+
+        # Contour du cylindre
+        ax.plot([0, 0, d_cyl, d_cyl, 0], [0, h_cyl_total, h_cyl_total, 0, 0], color="#222", lw=2, label="Cylindre")
+
+        # Réglage axes
+        ax.set_xlim(-0.08*d_cyl, d_cyl*1.12)
+        ax.set_ylim(-0.02*h_cyl_total, y*1.04)
+        ax.axis("off")
+
+        # Légende à droite
+        handles = [h for h in legend_handles if h.get_label()]
+        labels = [h.get_label() for h in handles]
+        ax.legend(handles, labels, loc="upper right", bbox_to_anchor=(1.22, 1.08), fontsize=9, frameon=True)
+
+        self.canvas = FigureCanvasTkAgg(fig, master=self.schema_zone)
+        self.canvas.draw()
+        self.canvas.get_tk_widget().pack(pady=10)
 
 
 
@@ -422,16 +567,20 @@ class PageDroneStructure(tk.Frame):
         form_frame = tk.Frame(self, bg=COULEURS["fond"])
         form_frame.pack()
 
-        self.longueur_entry = self._champ(form_frame, "Longueur de la corde (m)", 0)
-        self.hauteur_entry = self._champ(form_frame, "Épaisseur max (m)", 1)
-        # Optionnel : rendre la cambrure et sa position réglable
+        self.longueur_entry = self._champ(form_frame, "Longueur de la corde (mm)", 0)
+        self.hauteur_entry = self._champ(form_frame, "Épaisseur max (mm)", 1)
         self.camber_entry = self._champ(form_frame, "Cambrure max (%)", 2, default="2.0")
         self.camberpos_entry = self._champ(form_frame, "Position cambrure max (%)", 3, default="40")
 
         bouton_flat(self, "Afficher le profil", self.afficher_profil).pack(pady=15)
+        bouton_flat(self, "Exporter CSV SolidWorks", self.exporter_csv).pack(pady=5)
         bouton_flat(self, "Retour", lambda: controller.afficher_page(PageAccueil)).pack(pady=10)
 
         self.canvas = None
+        self.coord_label = tk.Label(self, text="", bg=COULEURS["fond"], fg="#333333", font=("Consolas", 8))
+        self.coord_label.pack()
+
+        self.last_coords = None
 
     def _champ(self, parent, label, row, default=""):
         l = tk.Label(parent, text=label, bg=COULEURS["fond"], fg=COULEURS["texte"], font=("Segoe UI", 10))
@@ -443,39 +592,40 @@ class PageDroneStructure(tk.Frame):
 
     def afficher_profil(self):
         try:
-            L = float(self.longueur_entry.get())
-            H = float(self.hauteur_entry.get())
-            camber = float(self.camber_entry.get()) / 100  # ex : 2% = 0.02
-            camber_pos = float(self.camberpos_entry.get()) / 100  # ex : 40% = 0.4
+            # Tout en millimètres
+            L = float(self.longueur_entry.get())      # corde en mm
+            H = float(self.hauteur_entry.get())       # épaisseur max en mm
+            camber = float(self.camber_entry.get()) / 100
+            camber_pos = float(self.camberpos_entry.get()) / 100
         except ValueError:
             self._show_error("Saisies invalides.")
             return
 
-        t = H / L  # épaisseur relative
-        n = 400  # points pour la courbe
+        t = H / L   # épaisseur relative (ex : 120/1000 = 0.12)
+        n = 200     # nombre de points du profil
 
-        x = np.linspace(0, L, n)
-        xt = x / L
+        x = np.linspace(0, L, n)      # mm
+        xt = x / L                    # de 0 à 1 (adimensionné)
 
-        # Calcul épaisseur et cambrure selon NACA 4 chiffres
         yt = 5 * t * (
             0.2969 * np.sqrt(xt) -
             0.1260 * xt -
-            0.3516 * xt**2 +
-            0.2843 * xt**3 -
-            0.1015 * xt**4
-        )
+            0.3516 * xt ** 2 +
+            0.2843 * xt ** 3 -
+            0.1015 * xt ** 4
+        ) * L     # => mm
 
+        # Courbe de cambrure (toujours en mm)
         yc = np.where(
             x < camber_pos * L,
-            camber / camber_pos**2 * (2 * camber_pos * x / L - (x / L)**2),
-            camber / (1 - camber_pos)**2 * ((1 - 2 * camber_pos) + 2 * camber_pos * x / L - (x / L)**2)
+            camber / (camber_pos ** 2) * (2 * camber_pos * x / L - (x / L) ** 2) * L,
+            camber / ((1 - camber_pos) ** 2) * ((1 - 2 * camber_pos) + 2 * camber_pos * x / L - (x / L) ** 2) * L
         )
 
         dyc_dx = np.where(
             x < camber_pos * L,
-            2 * camber / camber_pos**2 * (camber_pos - x / L),
-            2 * camber / (1 - camber_pos)**2 * (camber_pos - x / L)
+            2 * camber / (camber_pos ** 2) * (camber_pos - x / L),
+            2 * camber / ((1 - camber_pos) ** 2) * (camber_pos - x / L)
         )
         theta = np.arctan(dyc_dx)
 
@@ -484,14 +634,20 @@ class PageDroneStructure(tk.Frame):
         xl = x + yt * np.sin(theta)
         yl = yc - yt * np.cos(theta)
 
+        # Pour SolidWorks : on veut le contour complet (extrados puis intrados à l'envers)
+        X = np.concatenate([xu, xl[::-1]])
+        Y = np.concatenate([yu, yl[::-1]])
+        coords = np.vstack([X, Y]).T
+
+        # Affichage du profil (en mm)
         fig = Figure(figsize=(7, 2.5), dpi=100)
         ax = fig.add_subplot(111)
         ax.plot(xu, yu, label="Extrados", color='blue')
         ax.plot(xl, yl, label="Intrados", color='red')
         ax.fill_between(xu, yu, yl, where=(yu > yl), color='lightblue', alpha=0.3)
-        ax.set_title(f"Profil NACA optimisé - Corde={L:.2f}m, Ép.={H:.3f}m, Cambrure={camber*100:.1f}%")
-        ax.set_xlabel("x (m)")
-        ax.set_ylabel("y (m)")
+        ax.set_title(f"Profil NACA optimisé - Corde={L:.1f}mm, Ép.={H:.1f}mm, Cambrure={camber*100:.1f}%")
+        ax.set_xlabel("x (mm)")
+        ax.set_ylabel("y (mm)")
         ax.axis("equal")
         ax.legend()
         ax.grid(True)
@@ -502,9 +658,30 @@ class PageDroneStructure(tk.Frame):
         self.canvas.draw()
         self.canvas.get_tk_widget().pack(pady=10)
 
+        # Affiche les 10 premiers points pour contrôle
+        text = "x (mm)\ty (mm)\n" + "\n".join([f"{X[i]:.2f}\t{Y[i]:.2f}" for i in range(0, len(X), max(1, len(X)//10))])
+        self.coord_label.config(text=text)
+
+        self.last_coords = coords
+
+    def exporter_csv(self):
+        if self.last_coords is None:
+            self._show_error("Aucun profil généré !")
+            return
+
+        import tkinter.filedialog as fd
+        path = fd.asksaveasfilename(title="Exporter profil pour SolidWorks",
+                                    defaultextension=".csv",
+                                    filetypes=[("CSV files", "*.csv"), ("Text files", "*.txt")])
+        if not path:
+            return
+        # Export en millimètres (X,Y)
+        np.savetxt(path, self.last_coords, delimiter=",", header="X (mm),Y (mm)", comments='', fmt="%.4f")
+        self._show_error(f"Profil exporté avec succès : {path}")
+
     def _show_error(self, msg):
         error_popup = tk.Toplevel(self)
-        error_popup.title("Erreur")
+        error_popup.title("Info")
         tk.Label(error_popup, text=msg, fg="red").pack(padx=20, pady=10)
         bouton_flat(error_popup, "OK", error_popup.destroy).pack(pady=5)
 
@@ -783,6 +960,101 @@ class PageBoiteCrabot(tk.Frame):
         resultats += f"\nEntraxe estimé : {entraxe:.3f} m"
 
         self.resultat.config(text=resultats)
+        
+
+class PagePistonStirling(tk.Frame):
+    def __init__(self, parent, controller):
+        super().__init__(parent, bg=COULEURS["fond"])
+
+        tk.Label(self, text="Conception piston Stirling (galette)", bg=COULEURS["fond"],
+                 fg=COULEURS["primaire"], font=("Segoe UI", 18, "bold")).pack(pady=20)
+        descr = ("Ce calculateur estime toutes les côtes d’un piston galette pour moteur Stirling mono-cylindre.\n"
+                 "⚙️ Utilise la même architecture que la page moteur : entre les mêmes données de base.")
+        tk.Label(self, text=descr, bg=COULEURS["fond"], fg=COULEURS["texte"], font=("Segoe UI", 10)).pack()
+
+        self.champs = {}
+        donnees = [
+            ("Diamètre du cylindre (mm)", "d_cyl"),
+            ("Hauteur utile du cylindre (mm)", "h_cyl_utile"),
+            ("Nombre de joints", "nb_joints"),
+            ("Température chaude max (°C)", "t_chaude"),
+            ("Matériau du piston", "materiau_piston")
+        ]
+        for label, cle in donnees:
+            f = tk.Frame(self, bg=COULEURS["fond"])
+            tk.Label(f, text=label, font=("Segoe UI", 10), width=30, anchor="w",
+                     bg=COULEURS["fond"], fg=COULEURS["texte"]).pack(side="left")
+            entry = tk.Entry(f, width=15, font=("Segoe UI", 10))
+            entry.pack(side="right")
+            f.pack(pady=5)
+            self.champs[cle] = entry
+
+        # Valeurs par défaut pour le matériau du piston
+        self.champs["materiau_piston"].insert(0, "Alu 2017A / 6082 / Graphite")
+
+        self.resultat = tk.Label(self, text="", bg=COULEURS["fond"], fg=COULEURS["accent"],
+                                 font=("Segoe UI", 10), justify="left")
+        self.resultat.pack(pady=10)
+
+        bouton_flat(self, "Calculer le piston", self.calculer_piston).pack(pady=10)
+        bouton_flat(self, "Retour", lambda: controller.afficher_page(PageAccueil)).pack(pady=10)
+
+    def calculer_piston(self):
+        try:
+            # --- Lecture et valeurs standard ---
+            d_cyl = float(self.champs["d_cyl"].get())
+            h_cyl_utile = float(self.champs["h_cyl_utile"].get())
+            nb_joints = int(self.champs["nb_joints"].get()) if self.champs["nb_joints"].get() else 2
+            t_chaude = float(self.champs["t_chaude"].get()) if self.champs["t_chaude"].get() else 650
+            mat_piston = self.champs["materiau_piston"].get().strip() or "Aluminium 2017A"
+
+            # Cotes typiques pour piston galette :
+            jeu_lateral = 0.03 * d_cyl    # Jeu latéral entre piston et cylindre (3% du Ø, min 0.03 mm)
+            epaisseur_piston = max(0.16 * d_cyl, 8)  # Galette (16% du Ø mini 8mm)
+            profondeur_rainure = 1.6      # mm (rainure à joint torique)
+            largeur_rainure = 2.4         # mm (joint Viton standard)
+            epaisseur_fond = 0.12 * d_cyl # Fond de la galette (12% du Ø)
+            surface_piston = np.pi * (d_cyl / 2) ** 2  # mm²
+
+            masse_piston = (surface_piston * epaisseur_piston * 2.8e-3) / 1000  # Aluminium, densité ≈ 2.8g/cm³
+
+            # Température max selon matériau
+            if "graphite" in mat_piston.lower():
+                temp_max = 300  # °C (auto-lubrifiant)
+            elif "alu" in mat_piston.lower() or "aluminium" in mat_piston.lower():
+                temp_max = 200
+            elif "acier" in mat_piston.lower():
+                temp_max = 500
+            else:
+                temp_max = 200
+
+            # Résumé fabrication
+            consignes = (
+                f"- Ø galette : {d_cyl - 2*jeu_lateral:.2f} mm (jeu de {jeu_lateral:.2f} mm)\n"
+                f"- Épaisseur galette : {epaisseur_piston:.2f} mm\n"
+                f"- Fond galette : {epaisseur_fond:.2f} mm\n"
+                f"- Nombre de joints : {nb_joints} (rainure {largeur_rainure:.1f} × {profondeur_rainure:.1f} mm)\n"
+                f"- Masse piston estimée : {masse_piston:.1f} g\n"
+                f"- Température max piston : {temp_max} °C\n"
+            )
+
+            # Recommandations
+            remarque = (
+                f"✅ Conseil : Piston galette à faible jeu (auto-lubrifiant si graphite).\n"
+                "Préférer un alliage Alu 2017A, 6082, ou graphite dense (faible usure). "
+                "Rainure pour joint Viton ou PTFE renforcé. "
+                "Adapter la longueur du piston selon la course max (laisser 8 à 15 mm de sécurité pour la butée à pleine course)."
+            )
+
+            self.resultat.config(text=f"""
+🔩 **Piston galette pour Stirling**\n
+{consignes}
+Matériau conseillé : {mat_piston}
+{remarque}
+""")
+        except Exception as e:
+            self.resultat.config(text=f"Erreur : {str(e)}")
+
 
 # ----- Lancement -----
 app = AssistantCAO()
