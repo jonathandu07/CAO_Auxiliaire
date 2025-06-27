@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 COULEURS = {
     "fond": "#F4FEFE",         # Blanc-Lunaire (fond général)
     "primaire": "#051440",     # Bleu-France (titre principal, éléments forts)
-    "accent": "#FFC600",       # Jaune-Vatican (élément accent, surlignage)
+    "accent": "#0A0B0A",        # Jaune-Vatican (élément accent, surlignage)
     "texte": "#1E1E1E",        # Noir-Figma (texte principal)
     "bouton": "#303030",       # Anthracite (boutons principaux)
     "hover": "#3E5349",        # Natural-Green (survol bouton, hover)
@@ -121,7 +121,7 @@ class PageAccueil(tk.Frame):
             ("Boîte à crabots automatique", PageBoiteCrabot),
             ("Conception piston Stirling (galette)", PagePistonStirling),
             ("Dimensionnement vilebrequin", PageVilebrequin),
-            ("Dimensionnement vilebrequin", PageVilebrequin),
+            ("Dimensionnement moteur Stirling", PageDimensionnementStirling),
         ]
 
         for txt, page in boutons:
@@ -1445,6 +1445,7 @@ class PageDimensionnementStirling(tk.Frame):
 
         except Exception as e:
             self.resultat.config(text=f"Erreur : {str(e)}")
+
 
 # ----- Lancement -----
 app = AssistantCAO()
