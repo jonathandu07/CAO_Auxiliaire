@@ -9,6 +9,8 @@ from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import numpy as np
 from materiaux import MATERIAUX
+import math
+import pandas as pd
 
 # Couleurs officielles (extraites de l'image)
 COULEURS = {
@@ -168,39 +170,39 @@ class PageCalculs(tk.Frame):
             self.convert_result.config(text="Entrée invalide")
 
     def calculer(self):
-    try:
-        tol = float(self.tolerance_var.get()) / 100
-        F = float(self.entrees["force"].get())
-        L = float(self.entrees["longueur"].get()) / 1000
-        M = float(self.entrees["moment"].get())
-        T = float(self.entrees["couple"].get())
-        I = float(self.entrees["inertie"].get()) / 1e12
-        A = float(self.entrees["section"].get()) / 1e6
+        try:
+            tol = float(self.tolerance_var.get()) / 100
+            F = float(self.entrees["force"].get())
+            L = float(self.entrees["longueur"].get()) / 1000
+            M = float(self.entrees["moment"].get())
+            T = float(self.entrees["couple"].get())
+            I = float(self.entrees["inertie"].get()) / 1e12
+            A = float(self.entrees["section"].get()) / 1e6
 
-        mat_selectionne = self.materiau_var.get()
-        prop = MATERIAUX[mat_selectionne]
-        E = prop["E"]
-        Re = prop["Re"]
+            mat_selectionne = self.materiau_var.get()
+            prop = MATERIAUX[mat_selectionne]
+            E = prop["E"]
+            Re = prop["Re"]
 
-        # Contraintes pour matériau sélectionné
-        sigma_traction = F / A
-        sigma_flexion = M * (L / 2) / I if I else 0
-        tau_torsion = T * (L / 2) / I if I else 0
-        flambement = (np.pi ** 2 * E * I) / (L ** 2) if I else 0
-        A_min = (F / ((1 - tol) * Re)) * 1e6  # m² → mm²
+            # Contraintes pour matériau sélectionné
+            sigma_traction = F / A
+            sigma_flexion = M * (L / 2) / I if I else 0
+            tau_torsion = T * (L / 2) / I if I else 0
+            flambement = (np.pi ** 2 * E * I) / (L ** 2) if I else 0
+            A_min = (F / ((1 - tol) * Re)) * 1e6  # m² → mm²
 
-        # 🧠 Recherche du meilleur matériau selon A_min
-        meilleurs = []
-        for nom, props in MATERIAUX.items():
-            Re_mat = props["Re"]
-            if Re_mat == 0:
-                continue
-            A_calc = (F / ((1 - tol) * Re_mat)) * 1e6
-            meilleurs.append((nom, A_calc))
-        meilleurs.sort(key=lambda x: x[1])  # tri par section minimale croissante
-        meilleur_mat, meilleure_section = meilleurs[0]
+            # 🧠 Recherche du meilleur matériau selon A_min
+            meilleurs = []
+            for nom, props in MATERIAUX.items():
+                Re_mat = props["Re"]
+                if Re_mat == 0:
+                    continue
+                A_calc = (F / ((1 - tol) * Re_mat)) * 1e6
+                meilleurs.append((nom, A_calc))
+            meilleurs.sort(key=lambda x: x[1])  # tri par section minimale croissante
+            meilleur_mat, meilleure_section = meilleurs[0]
 
-        resultat = f"""
+            resultat = f"""
 Contrainte de traction : {sigma_traction:.2f} Pa
 Contrainte de flexion : {sigma_flexion:.2f} Pa
 Contrainte de torsion : {tau_torsion:.2f} Pa
@@ -212,12 +214,10 @@ Résistance limite du matériau : {Re:.2f} Pa
 ✅ Meilleur matériau : {meilleur_mat}
 👉 Section minimale requise : {meilleure_section:.2f} mm²
 """
-        self.resultat_label.config(text=resultat.strip())
+            self.resultat_label.config(text=resultat.strip())
 
-    except Exception as e:
-        self.resultat_label.config(text=f"Erreur : {str(e)}")
-
-
+        except Exception as e:
+            self.resultat_label.config(text=f"Erreur : {str(e)}")
 
 
 class PageMateriaux(tk.Frame):
@@ -268,10 +268,10 @@ class PageMoteurStirling(tk.Frame):
         self.champs = {}
         donnees = [
             ("Puissance souhaitée (W)", "puissance"),
-            ("Fréquence de fonctionnement (Hz)", "freq"),
             ("Température chaude (°C)", "t_chaude"),
             ("Température froide (°C)", "t_froide"),
             ("Pression moyenne (bar)", "pression"),
+            ("Fréquence de fonctionnement (Hz)", "freq")
         ]
 
         for label, cle in donnees:
@@ -287,53 +287,65 @@ class PageMoteurStirling(tk.Frame):
         f_gaz = tk.Frame(self, bg=COULEURS["fond"])
         tk.Label(f_gaz, text="Gaz utilisé", font=("Segoe UI", 10), width=30, anchor="w",
                  bg=COULEURS["fond"], fg=COULEURS["texte"]).pack(side="left")
-        self.gaz_var = tk.StringVar()
-        self.gaz_var.set("Air")
+        self.gaz_var = tk.StringVar(value="Air")
         menu = tk.OptionMenu(f_gaz, self.gaz_var, "Air", "Hélium", "Hydrogène", "Azote")
         menu.config(bg=COULEURS["fond"], fg=COULEURS["texte"], font=("Segoe UI", 10), highlightthickness=0)
         menu.pack(side="right")
         f_gaz.pack(pady=5)
 
-        self.resultat_label = tk.Label(self, text="", bg=COULEURS["fond"], fg=COULEURS["accent"], font=("Segoe UI", 10))
-        self.resultat_label.pack(pady=10)
+        # Résultat
+        self.resultat = tk.Label(self, text="", bg=COULEURS["fond"], fg=COULEURS["accent"],
+                                 font=("Segoe UI", 10), justify="left")
+        self.resultat.pack(pady=10)
 
-        bouton_flat(self, "Calculer", self.calculer).pack(pady=10)
-        bouton_flat(self, "Retour", lambda: controller.afficher_page(PageAccueil)).pack(pady=30)
+        # Boutons
+        bouton_flat(self, "Calculer le moteur", self.calculer).pack(pady=10)
+        bouton_flat(self, "Retour", lambda: controller.afficher_page(PageAccueil)).pack(pady=10)
 
     def calculer(self):
         try:
-            P = float(self.champs["puissance"].get())  # W
-            f = float(self.champs["freq"].get())  # Hz
-            T_hot = float(self.champs["t_chaude"].get()) + 273.15  # K
-            T_cold = float(self.champs["t_froide"].get()) + 273.15  # K
-            p = float(self.champs["pression"].get()) * 1e5  # bar to Pa
+            W = float(self.champs["puissance"].get())
+            T_hot = float(self.champs["t_chaude"].get()) + 273.15
+            T_cold = float(self.champs["t_froide"].get()) + 273.15
+            P_bar = float(self.champs["pression"].get())
+            f = float(self.champs["freq"].get())
+            gaz = self.gaz_var.get()
 
+            rendement = 0.35  # estimation réaliste
             delta_T = T_hot - T_cold
-            eta = 1 - T_cold / T_hot
-            W_cycle = P / f
-            V_total = W_cycle / (eta * p)
+            eta_carnot = delta_T / T_hot
+            eta_total = eta_carnot * rendement
+            energie_cycle = W / (f * eta_total)
 
-            d = ((4 * V_total / np.pi) ** (1/3)) * 1000  # mm approx pour un cylindre court
-            h = d
-            course = d * 0.75
-            bielle = d * 1.5
-            couple = W_cycle / (2 * np.pi)
+            P_Pa = P_bar * 1e5
+            V_tot = energie_cycle / (P_Pa * delta_T / T_hot)
+
+            d_cyl = (4 * V_tot * 1e6 / (np.pi * 30)) ** (1 / 3)
+            h_cyl = 1.2 * d_cyl
+            course = h_cyl / 2
+            vilebrequin = course / 2
+            couple = W / (2 * np.pi * f)
             rpm = f * 60
 
-            resultat = f"""
-Diamètre cylindre : {d:.1f} mm
-Hauteur cylindre : {h:.1f} mm
-Course piston : {course:.1f} mm
-Longueur vilebrequin : {bielle:.1f} mm
-Couple estimé : {couple:.2f} Nm
-Tours par minute : {rpm:.0f} rpm
-Gaz : {self.gaz_var.get()}
-État de surface : poli Ra < 0.4 μm
-Type de roulement : Roulement à billes céramique (vitesse élevée)
-"""
-            self.resultat_label.config(text=resultat.strip())
+            etat_surface = "Ra ≤ 0.4 µm"
+            roulement = "Roulement à billes étanche, acier inox ou céramique"
+
+            self.resultat.config(text=f"""
+🔧 Résultats pour {W:.0f} W avec gaz = {gaz} :
+- Volume total : {V_tot*1e6:.2f} cm³
+- Diamètre du cylindre : {d_cyl:.2f} mm
+- Hauteur du cylindre : {h_cyl:.2f} mm
+- Course du piston : {course:.2f} mm
+- Longueur du vilebrequin : {vilebrequin:.2f} mm
+- Couple attendu : {couple:.2f} Nm
+- Vitesse de rotation : {rpm:.0f} tr/min
+
+🛠️ État de surface : {etat_surface}
+⚙️ Type de roulement : {roulement}
+""")
         except Exception as e:
-            self.resultat_label.config(text=f"Erreur : {str(e)}")
+            self.resultat.config(text=f"Erreur : {str(e)}")
+
 
 
 
