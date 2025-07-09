@@ -6,34 +6,56 @@ import numpy as np
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
+# Propriétés matériaux courants pour la bielle (Re en MPa, densité en g/cm3)
+MATERIAUX_BIELLE = [
+    {"nom": "Acier 42CrMo4", "Re": 900, "Rm": 1100, "densite": 7.85, "usage": "standard / haute charge"},
+    {"nom": "Acier S355", "Re": 355, "Rm": 510, "densite": 7.85, "usage": "moyenne charge"},
+    {"nom": "Alu 7075-T6", "Re": 500, "Rm": 560, "densite": 2.8, "usage": "léger / compétition"},
+    {"nom": "Titane Grade 5", "Re": 830, "Rm": 900, "densite": 4.4, "usage": "haute perf / aviation"},
+]
+
+def meilleur_materiau(Fmax, section_min):
+    """Propose le matériau optimal selon la contrainte et la masse finale"""
+    # Recherche du matériau ayant la contrainte requise et masse la plus faible
+    mini = None
+    best = None
+    for mat in MATERIAUX_BIELLE:
+        adm = mat["Re"] * 1e6 * 0.5  # coeff sécurité, section ajourée
+        if Fmax <= adm * section_min:
+            masse = section_min * 1000 * mat["densite"]  # volume = section*1mm, masse = densité*volume
+            if mini is None or masse < mini:
+                mini = masse
+                best = mat
+    return best or MATERIAUX_BIELLE[0]
+
 class PageBielleStirling(tk.Frame):
     def __init__(self, parent, controller):
         super().__init__(parent, bg=COULEURS["fond"])
         self.controller = controller
 
-        tk.Label(self, text="Dimensionnement de la bielle du Stirling", bg=COULEURS["fond"],
+        tk.Label(self, text="Dimensionnement technique de la bielle Stirling", bg=COULEURS["fond"],
                  fg=COULEURS["primaire"], font=("Segoe UI", 18, "bold")).pack(pady=18)
 
         descr = (
-            "Cette page calcule les dimensions principales d'une bielle pour un moteur Stirling mono-cylindre,\n"
-            "en tenant compte du diamètre du cylindre, du rayon du vilebrequin et des efforts transmis."
+            "Plan complet : entre les cotes principales et la tolérance de sécurité souhaitée.\n"
+            "Le matériau optimal est automatiquement proposé (poids/performance)."
         )
         tk.Label(self, text=descr, bg=COULEURS["fond"], fg=COULEURS["texte"], font=("Segoe UI", 10)).pack()
 
-        # Entrées principales (pré-remplies si possible depuis le memo)
+        # Entrées principales
         form = tk.Frame(self, bg=COULEURS["fond"])
         form.pack(pady=12)
 
         self.d_cyl = self._champ(form, "Diamètre cylindre (mm)", 0)
         self.rayon_manivelle = self._champ(form, "Rayon excentrique vilebrequin (mm)", 1)
-        self.f_max = self._champ(form, "Effort max (N)", 2)
+        self.f_max = self._champ(form, "Effort max transmis (N)", 2)
         self.L_bielle = self._champ(form, "Longueur totale bielle (mm)", 3)
         self.d_tete_piston = self._champ(form, "Diamètre œil côté piston (mm)", 4)
         self.d_tete_vilebrequin = self._champ(form, "Diamètre œil côté maneton (mm)", 5)
-        self.mat_bielle = self._champ(form, "Matériau (ex: Acier 42CrMo4)", 6, default="Acier 42CrMo4")
+        self.tol = self._champ(form, "Tolérance sécurité (%)", 6, default="20")
 
         bouton_flat(form, "Calculer la bielle", self.calculer_bielle).grid(row=8, columnspan=2, pady=10)
-        bouton_flat(form, "Retour", lambda: controller.afficher_page(self.controller.frames.keys()[0])).grid(row=9, columnspan=2, pady=4)
+        bouton_flat(form, "Retour", lambda: controller.afficher_page(list(self.controller.frames.keys())[0])).grid(row=9, columnspan=2, pady=4)
 
         self.resultat = tk.Label(self, text="", bg=COULEURS["fond"], fg=COULEURS["accent"],
                                  font=("Consolas", 10), justify="left")
@@ -52,24 +74,19 @@ class PageBielleStirling(tk.Frame):
 
     def prefill_from_memo(self):
         memo = getattr(self.controller, "memo_moteur_stirling", {})
-        # Suggère des valeurs réalistes si dispo
         if memo.get("d_cyl"):
             self.d_cyl.delete(0, tk.END)
             self.d_cyl.insert(0, str(memo["d_cyl"]))
-        # Rayon manivelle par défaut : 0.6 x diamètre cylindre (ratio à ajuster)
         if memo.get("d_cyl") and not self.rayon_manivelle.get():
             self.rayon_manivelle.insert(0, f"{float(memo['d_cyl'])/2*0.6:.1f}")
-        # Longueur bielle par défaut : 3 x rayon manivelle
         if self.rayon_manivelle.get() and not self.L_bielle.get():
             self.L_bielle.insert(0, f"{float(self.rayon_manivelle.get())*3:.1f}")
-        # Diamètres d’œil
         if memo.get("d_cyl"):
             d_cyl = float(memo["d_cyl"])
             self.d_tete_piston.insert(0, f"{max(0.35*d_cyl, 10):.1f}")
             self.d_tete_vilebrequin.insert(0, f"{max(0.3*d_cyl, 8):.1f}")
-        # Effort max : pression x surface piston
         if memo.get("pression") and memo.get("d_cyl"):
-            P = float(memo["pression"])*1e5  # bar -> Pa
+            P = float(memo["pression"])*1e5
             A = np.pi * (float(memo["d_cyl"])/2/1000)**2
             self.f_max.insert(0, f"{P*A:.1f}")
 
@@ -81,41 +98,42 @@ class PageBielleStirling(tk.Frame):
             L = float(self.L_bielle.get())
             d_t_pist = float(self.d_tete_piston.get())
             d_t_vil = float(self.d_tete_vilebrequin.get())
-            mat = self.mat_bielle.get().strip() or "Acier 42CrMo4"
+            tol = float(self.tol.get())/100
 
-            # Calculs section mini, largeur, épaisseur
-            # Hypothèse : sollicitation en traction/compression
-            sigma_adm = 380e6  # Pa (42CrMo4)
-            section_min = F_max / (0.5 * sigma_adm) * 1.5  # sécurité x1.5, coeff 0.5 si section rectangulaire ajourée
+            # Calculs section mini (sécurité intégrée)
+            # On cherche la section minimale avec la tolérance (ex: 20%)
+            # Hypothèse section rectangulaire ajourée, coeff 0.5
+            section_min = F_max / (0.5 * 400e6 * (1-tol)) * 1.6  # 400MPa: mini acier, 1.6 marge d’usinage
 
-            largeur_bielle = max(0.22*d_cyl, 8)  # typique 20-25% du Ø cylindre
-            epaisseur_bielle = max(section_min / largeur_bielle, 4)  # mini 4mm
+            largeur_bielle = max(0.22*d_cyl, 8)
+            epaisseur_bielle = max(section_min / largeur_bielle, 4)
 
-            # Conseils SolidWorks / usinage
+            mat = meilleur_materiau(F_max, section_min)
+            masse_bielle = largeur_bielle * epaisseur_bielle * L * mat["densite"] * 1e-3 / 1000
+
             plan_tech = (
                 f"- Longueur axe à axe : {L:.2f} mm\n"
                 f"- Largeur bielle : {largeur_bielle:.2f} mm\n"
                 f"- Épaisseur bielle : {epaisseur_bielle:.2f} mm\n"
-                f"- Diamètre œil piston : {d_t_pist:.2f} mm (roulement/bague bronze/axe)\n"
+                f"- Section mini utile : {section_min:.2f} mm²\n"
+                f"- Diamètre œil piston : {d_t_pist:.2f} mm\n"
                 f"- Diamètre œil maneton : {d_t_vil:.2f} mm\n"
                 f"- Entraxe œil : {L:.2f} mm\n"
-                f"- Matière : {mat}\n"
-                f"- Rainure graissage et chanfrein d'ébauche conseillés.\n"
-                f"- Usiner les têtes d'œil pour circlips ou bagues de maintien."
+                f"- Tolérance sécurité : {tol*100:.0f}%\n"
+                f"- Matière optimale : {mat['nom']} (Re={mat['Re']} MPa, densité={mat['densite']} g/cm³)\n"
+                f"- Rainures de graissage, rayons généreux aux transitions.\n"
+                f"- Chanfreinage et arrondis pour éviter toute amorce de rupture.\n"
+                f"- Circlips ou bagues pour axe/œil, perçage à tolérance h7/g6.\n"
             )
-
-            # Masse (approximative)
-            volume_bielle = largeur_bielle * epaisseur_bielle * L  # mm³
-            masse_bielle = volume_bielle * 7.85e-3 / 1000  # acier
-
             conseils = (
-                "✅ Conseil : Prévoir rayons généreux pour éviter les amorces de rupture. "
-                "Utiliser une bielle ajourée pour réduire la masse, contrôler l'équilibrage dynamique.\n"
-                "Prévoir une visserie M6 ou M8 (8.8) pour la fixation de la tête de bielle si démontable."
+                "✅ Usinage : Ajourage possible pour allègement, éviter l’échauffement. "
+                "Prévoir une visserie M6 ou M8 (classe 8.8 mini) pour l’assemblage des têtes démontables.\n"
+                "Surface recommandée Ra ≤ 1,6 µm.\n"
+                "💡 Astuce SolidWorks : modélise chaque œil avec un lamage et tolérance serrée.\n"
             )
 
             self.resultat.config(text=f"""
-🔩 **Plan technique bielle moteur Stirling**\n
+🔩 **PLAN TECHNIQUE DE BIELLE - Moteur Stirling**\n
 {plan_tech}
 Masse estimée : {masse_bielle:.1f} g
 
@@ -147,7 +165,6 @@ Masse estimée : {masse_bielle:.1f} g
         ax.text(L/2, y0-0.17, "Corps bielle", ha="center", color="#555")
         ax.text(L, y0+0.19, "Œil maneton", ha="center", color="#a33")
 
-        # Cotes
         ax.annotate(f"{L:.1f} mm", xy=(L/2, y0+0.13), xytext=(L/2, y0+0.25),
                     ha="center", arrowprops=dict(arrowstyle="<->"))
         ax.set_xlim(-L*0.15, L*1.15)
