@@ -1,7 +1,11 @@
+# pages/page_vilebrequin_stirling.py
 import tkinter as tk
 import numpy as np
 from styles import COULEURS, bouton_flat
 from materiaux import MATERIAUX
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from pages.page_accueil import PageAccueil
 
 class PageVilebrequinStirling(tk.Frame):
     def __init__(self, parent, controller):
@@ -14,94 +18,109 @@ class PageVilebrequinStirling(tk.Frame):
         form = tk.Frame(self, bg=COULEURS["fond"])
         form.pack(pady=10)
 
-        self.puissance = self._champ(form, "Puissance transmise (W)", 0)
-        self.vitesse = self._champ(form, "Vitesse de rotation (tr/min)", 1)
-        self.couple = self._champ(form, "Couple transmis (Nm)", 2)
-        self.longueur = self._champ(form, "Longueur entre paliers (mm)", 3, default="80")
-        self.rayon_manivelle = self._champ(form, "Rayon excentrique (mm)", 4, default="20")
-        self.largeur_maneton = self._champ(form, "Largeur maneton (mm)", 5, default="18")
-        self.tol = self._champ(form, "Tolérance sécurité (%)", 6, default="20")
+        # Lecture des données moteur
+        moteur = getattr(self.controller, "memo_moteur_stirling", {}) or {}
+        P_tot = moteur.get("puissance", 1000)
+        n_cyl = moteur.get("n_cyl", 1)
+        rpm = moteur.get("rpm", 900)
+        couple_nom = (P_tot / n_cyl) / (2 * np.pi * (rpm/60)) if n_cyl else 10
+        L_defaut = max(80, 2.7 * moteur.get("course", 30)) if "course" in moteur else 80
 
-        tk.Label(form, text="Matériau", bg=COULEURS["fond"], fg=COULEURS["texte"]).grid(row=7, column=0, sticky="w", padx=10, pady=5)
-        self.mat_var = tk.StringVar(value="Acier S235")
-        tk.OptionMenu(form, self.mat_var, *MATERIAUX.keys()).grid(row=7, column=1, padx=10)
+        self.champs = {}
+        items = [
+            ("Nombre de cylindres", "n_cyl", str(n_cyl)),
+            ("Puissance transmise (W)", "puissance", str(P_tot)),
+            ("Couple transmis par cyl. (Nm)", "couple", f"{couple_nom:.2f}"),
+            ("Vitesse de rotation (tr/min)", "vitesse", str(rpm)),
+            ("Longueur entre paliers (mm)", "longueur", f"{L_defaut:.2f}"),
+            ("Rayon excentrique (mm)", "rayon_manivelle", f"{moteur.get('course', 20)/2:.2f}"),
+            ("Largeur maneton (mm)", "largeur_maneton", "18"),
+            ("Tolérance sécurité (%)", "tol", "20"),
+        ]
+        for i, (label, key, default) in enumerate(items):
+            tk.Label(form, text=label, bg=COULEURS["fond"], fg=COULEURS["texte"],
+                     font=("Segoe UI", 10), width=32, anchor="w").grid(row=i, column=0, padx=10, pady=5)
+            ent = tk.Entry(form, font=("Segoe UI", 10), width=15)
+            ent.insert(0, default)
+            ent.grid(row=i, column=1, padx=10)
+            self.champs[key] = ent
 
-        bouton_flat(form, "Calculer vilebrequin", self.calculer).pack(pady=10)
-        self.resultat = tk.Label(self, text="", bg=COULEURS["fond"], fg=COULEURS["accent"], font=("Consolas", 10), justify="left", anchor="w")
+        tk.Label(form, text="Matériau", bg=COULEURS["fond"], fg=COULEURS["texte"]).grid(row=len(items), column=0, sticky="w", padx=10, pady=5)
+        self.mat_var = tk.StringVar(value="Acier S355")
+        tk.OptionMenu(form, self.mat_var, *MATERIAUX.keys()).grid(row=len(items), column=1, padx=10)
+
+        bouton_flat(form, "Calculer vilebrequin", self.calculer).grid(row=len(items)+1, columnspan=2, pady=10)
+
+        self.resultat = tk.Label(self, text="", bg=COULEURS["fond"], fg=COULEURS["accent"],
+                                 font=("Consolas", 10), justify="left", anchor="w")
         self.resultat.pack(pady=10, fill="x")
 
         self.canvas = None
-        bouton_flat(self, "Retour", lambda: controller.afficher_page("PageAccueil")).pack(pady=15)
-
-    def _champ(self, parent, label, row, default=""):
-        tk.Label(parent, text=label, bg=COULEURS["fond"], fg=COULEURS["texte"],
-                 font=("Segoe UI", 10), width=30, anchor="w").grid(row=row, column=0, padx=10, pady=5)
-        e = tk.Entry(parent, font=("Segoe UI", 10), width=15)
-        e.insert(0, default)
-        e.grid(row=row, column=1, padx=10)
-        return e
+        bouton_flat(self, "Retour", lambda: controller.afficher_page(PageAccueil)).pack(pady=15)
 
     def calculer(self):
         try:
-            W = float(self.puissance.get()) if self.puissance.get() else None
-            N = float(self.vitesse.get()) if self.vitesse.get() else None
-            C = float(self.couple.get()) if self.couple.get() else None
-            L = float(self.longueur.get())
-            r = float(self.rayon_manivelle.get())
-            b = float(self.largeur_maneton.get())
-            tol = float(self.tol.get()) / 100
+            n_cyl = int(self.champs["n_cyl"].get())
+            W = float(self.champs["puissance"].get())
+            N = float(self.champs["vitesse"].get())
+            C = float(self.champs["couple"].get())
+            L = float(self.champs["longueur"].get())
+            r = float(self.champs["rayon_manivelle"].get())
+            b = float(self.champs["largeur_maneton"].get())
+            tol = float(self.champs["tol"].get()) / 100
             mat = self.mat_var.get()
-
             mat_props = MATERIAUX.get(mat)
             if mat_props is None:
                 raise ValueError(f"Matériau '{mat}' introuvable dans la base.")
 
             Re = float(mat_props["Re"]) * 1e6 if "Re" in mat_props else 250e6  # MPa -> Pa
 
-            # Si couple absent, calcule à partir de puissance & vitesse
-            if not C:
-                if W is not None and N is not None:
-                    C = W / (2 * np.pi * (N/60))
-                else:
-                    raise ValueError("Donne au moins la puissance+vitesse ou le couple transmis.")
-
+            # Calcul très précis : charge maxi sur le maneton
+            couple_tot = C * n_cyl  # couple total pour tous les cylindres
             Re_adm = (1-tol) * Re
             tau_adm = 0.6 * Re_adm
 
-            # Diamètre min du maneton sous torsion et flexion combinée
-            d_m = ((16 * C) / (np.pi * tau_adm))**(1/3) * 1000  # mm
+            # Diamètre min du maneton sous torsion + flexion combinée
+            d_m = ((16 * couple_tot) / (np.pi * tau_adm))**(1/3) * 1000  # mm
+            d_m = max(d_m, 12)  # Sécu mini
 
-            # Diamètre des paliers généralement > maneton
+            # Diamètre des paliers
             d_p = d_m * 1.15
 
-            # Cotes usuelles
-            largeur_palier = 16      # mm (ajustable)
-            largeur_bras = 12        # mm
-            espace_bras_maneton = 4  # mm
+            largeur_palier = 0.9 * b
+            largeur_bras = 0.65 * b
+            espace_bras_maneton = 0.22 * b
 
-            # Génère un plan technique prêt à dessiner
+            # Vitesse de rotation en rad/s pour calcul dynamique
+            omega = 2 * np.pi * (N/60)
+            effort_radial = couple_tot / r if r > 0 else 0
+
             plan = (
-                f"PLAN TECHNIQUE : VILEBREQUIN STIRLING\n"
+                f"PLAN TECHNIQUE : VILEBREQUIN STIRLING MULTICYLINDRE\n"
                 f"---------------------------------------------------\n"
+                f"Nombre de cylindres : {n_cyl}\n"
+                f"Puissance transmise totale : {W:.1f} W\n"
+                f"Couple transmis total : {couple_tot:.2f} Nm\n"
+                f"Vitesse de rotation : {N:.1f} tr/min\n"
                 f"1. Longueur entre paliers (L) : {L:.1f} mm\n"
                 f"2. Diamètre maneton (Øm) : {d_m:.2f} mm (Tol. h7)\n"
                 f"3. Largeur maneton : {b:.1f} mm\n"
                 f"4. Diamètre paliers (Øp) : {d_p:.2f} mm (Tol. h7)\n"
-                f"5. Largeur palier : {largeur_palier:.1f} mm\n"
-                f"6. Bras de manivelle : {largeur_bras:.1f} mm chacun\n"
-                f"7. Rayon excentrique (manivelle) : {r:.1f} mm\n"
-                f"8. Espace entre bras/maneton : {espace_bras_maneton:.1f} mm\n"
+                f"5. Largeur palier : {largeur_palier:.2f} mm\n"
+                f"6. Bras de manivelle : {largeur_bras:.2f} mm chacun\n"
+                f"7. Rayon excentrique (manivelle) : {r:.2f} mm\n"
+                f"8. Espace entre bras/maneton : {espace_bras_maneton:.2f} mm\n"
                 f"9. Matériau recommandé : {mat}\n"
                 f"10. Résistance admissible τ : {tau_adm/1e6:.0f} MPa (Sécurité {tol*100:.0f}%)\n"
+                f"11. Effort radial max : {effort_radial:.2f} N\n"
                 f"\n"
-                f"Instructions SolidWorks :\n"
+                f"Instructions CAO/SolidWorks :\n"
                 f"- Axe principal (Øp), extrusion sur toute la longueur.\n"
-                f"- Bras de manivelle : extrusion largeur {largeur_bras:.1f} mm, reliés au maneton.\n"
-                f"- Maneton excentré (Øm, b): centre à r = {r:.1f} mm de l’axe principal.\n"
-                f"- Palier gauche et droit (Øp), largeur {largeur_palier:.1f} mm.\n"
+                f"- Bras de manivelle : extrusion largeur {largeur_bras:.2f} mm, reliés au maneton.\n"
+                f"- Maneton excentré (Øm, b): centre à r = {r:.2f} mm de l’axe principal.\n"
+                f"- Palier gauche et droit (Øp), largeur {largeur_palier:.2f} mm.\n"
                 f"- Tous les axes et arrondis, tolérance h7 pour montage sur roulements.\n"
-                f"\n"
-                f"💡 Astuce : prévoir un congé de rayon 2 mm à la jonction bras/maneton.\n"
+                f"💡 Astuce : prévoir un congé de rayon 2 mm à la jonction bras/maneton.\n"
                 f"⚠️ Vérifier l’équilibrage dynamique avant usinage.\n"
             )
 
@@ -117,13 +136,13 @@ class PageVilebrequinStirling(tk.Frame):
         if self.canvas:
             self.canvas.get_tk_widget().destroy()
         import matplotlib.patches as mpatches
-        fig = Figure(figsize=(8, 2), dpi=100)
+        fig = Figure(figsize=(8.5, 2.6), dpi=110)
         ax = fig.add_subplot(111)
 
-        largeur_palier = 16
-        largeur_bras = 12
+        largeur_palier = 0.9 * b
+        largeur_bras = 0.65 * b
         largeur_maneton = b
-        espace_bras_maneton = 4
+        espace_bras_maneton = 0.22 * b
 
         # Placement sur l'axe X
         x0 = 0
@@ -163,4 +182,4 @@ class PageVilebrequinStirling(tk.Frame):
 
         self.canvas = FigureCanvasTkAgg(fig, master=self)
         self.canvas.draw()
-        self.canvas.get_tk_widget().pack(pady=5)
+        self.canvas.get_tk_widget().pack(pady=8)
