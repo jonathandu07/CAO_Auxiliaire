@@ -9,6 +9,7 @@ from materiaux import MATERIAUX
 import math
 import pandas as pd
 import matplotlib.pyplot as plt
+from styles import COULEURS, bouton_flat
 
 class PageBoiteCrabot(tk.Frame):
     def __init__(self, parent, controller):

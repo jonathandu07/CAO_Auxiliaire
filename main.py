@@ -1,6 +1,5 @@
 import tkinter as tk
-from styles import COULEURS, bouton_flat  # widgets/colours personnalisés
-import os
+from styles import COULEURS, bouton_flat  # widgets/couleurs personnalisés
 
 # --- Import des pages ---
 from pages.page_accueil import PageAccueil
@@ -33,6 +32,7 @@ class AssistantCAO(tk.Tk):
         container = tk.Frame(self, bg=COULEURS["fond"])
         container.pack(fill="both", expand=True)
 
+        # Initialisation des pages
         for F in (
             PageAccueil,
             PageCalculs,
