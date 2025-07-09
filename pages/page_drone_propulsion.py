@@ -57,3 +57,4 @@ class PageDronePropulsion(tk.Frame):
 Puissance moteur nécessaire : {puissance_w:.0f} W
 Capacité minimale batterie : {energie_wh:.0f} Wh
 Courant requis (à {tension_v} V) : {courant_a:.1f} A
+""")
