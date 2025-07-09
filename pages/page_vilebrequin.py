@@ -1,15 +1,7 @@
 import tkinter as tk
-import os
-from PIL import Image, ImageTk
-from matplotlib.figure import Figure
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import numpy as np
-from mpl_toolkits.basemap import Basemap
-from materiaux import MATERIAUX
-import math
-import pandas as pd
-import matplotlib.pyplot as plt
 from styles import COULEURS, bouton_flat
+from materiaux import MATERIAUX
 
 class PageVilebrequin(tk.Frame):
     def __init__(self, parent, controller):
@@ -34,12 +26,12 @@ class PageVilebrequin(tk.Frame):
         self.mat_var = tk.StringVar(value="Acier S235")
         tk.OptionMenu(form, self.mat_var, *MATERIAUX.keys()).grid(row=7, column=1, padx=10)
 
-        bouton_flat(self, "Calculer vilebrequin", self.calculer).pack(pady=10)
-        self.resultat = tk.Label(self, text="", bg=COULEURS["fond"], fg=COULEURS["accent"], font=("Consolas", 10), justify="left")
-        self.resultat.pack(pady=10)
+        bouton_flat(form, "Calculer vilebrequin", self.calculer).pack(pady=10)
+        self.resultat = tk.Label(self, text="", bg=COULEURS["fond"], fg=COULEURS["accent"], font=("Consolas", 10), justify="left", anchor="w")
+        self.resultat.pack(pady=10, fill="x")
 
         self.canvas = None
-        bouton_flat(self, "Retour", lambda: controller.afficher_page(PageAccueil)).pack(pady=15)
+        bouton_flat(self, "Retour", lambda: controller.afficher_page("PageAccueil")).pack(pady=15)
 
     def _champ(self, parent, label, row, default=""):
         tk.Label(parent, text=label, bg=COULEURS["fond"], fg=COULEURS["texte"],
@@ -82,14 +74,38 @@ class PageVilebrequin(tk.Frame):
             # Diamètre des paliers généralement > maneton
             d_p = d_m * 1.15
 
-            self.resultat.config(text=f"""
-🧮 Calcul vilebrequin :
-- Couple transmis = {C:.2f} Nm | L = {L:.0f} mm | Rayon excentrique = {r:.1f} mm
-- Résistance admissible τ = {tau_adm/1e6:.0f} MPa (sécurité {tol*100:.0f}%)
-- **Ø maneton mini recommandé** : {d_m:.1f} mm
-- **Ø paliers recommandé** : {d_p:.1f} mm
-- Largeur maneton : {b:.1f} mm
-""")
+            # Cotes usuelles
+            largeur_palier = 16      # mm (ajustable)
+            largeur_bras = 12        # mm
+            espace_bras_maneton = 4  # mm
+
+            # Génère un plan technique prêt à dessiner
+            plan = (
+                f"PLAN TECHNIQUE : VILEBREQUIN STIRLING\n"
+                f"---------------------------------------------------\n"
+                f"1. Longueur entre paliers (L) : {L:.1f} mm\n"
+                f"2. Diamètre maneton (Øm) : {d_m:.2f} mm (Tol. h7)\n"
+                f"3. Largeur maneton : {b:.1f} mm\n"
+                f"4. Diamètre paliers (Øp) : {d_p:.2f} mm (Tol. h7)\n"
+                f"5. Largeur palier : {largeur_palier:.1f} mm\n"
+                f"6. Bras de manivelle : {largeur_bras:.1f} mm chacun\n"
+                f"7. Rayon excentrique (manivelle) : {r:.1f} mm\n"
+                f"8. Espace entre bras/maneton : {espace_bras_maneton:.1f} mm\n"
+                f"9. Matériau recommandé : {mat}\n"
+                f"10. Résistance admissible τ : {tau_adm/1e6:.0f} MPa (Sécurité {tol*100:.0f}%)\n"
+                f"\n"
+                f"Instructions SolidWorks :\n"
+                f"- Axe principal (Øp), extrusion sur toute la longueur.\n"
+                f"- Bras de manivelle : extrusion largeur {largeur_bras:.1f} mm, reliés au maneton.\n"
+                f"- Maneton excentré (Øm, b): centre à r = {r:.1f} mm de l’axe principal.\n"
+                f"- Palier gauche et droit (Øp), largeur {largeur_palier:.1f} mm.\n"
+                f"- Tous les axes et arrondis, tolérance h7 pour montage sur roulements.\n"
+                f"\n"
+                f"💡 Astuce : prévoir un congé de rayon 2 mm à la jonction bras/maneton.\n"
+                f"⚠️ Vérifier l’équilibrage dynamique avant usinage.\n"
+            )
+
+            self.resultat.config(text=plan)
             self.afficher_schema(d_p, d_m, L, r, b)
         except Exception as e:
             self.resultat.config(text=f"Erreur : {str(e)}")
@@ -104,13 +120,12 @@ class PageVilebrequin(tk.Frame):
         fig = Figure(figsize=(8, 2), dpi=100)
         ax = fig.add_subplot(111)
 
-        # --- Dimensions des éléments principaux ---
-        largeur_palier = 16      # mm (ajustable)
-        largeur_bras = 12        # mm
-        largeur_maneton = b      # mm (entrée utilisateur)
-        espace_bras_maneton = 4  # mm pour visibilité
+        largeur_palier = 16
+        largeur_bras = 12
+        largeur_maneton = b
+        espace_bras_maneton = 4
 
-        # Placement sur l'axe X (gauche à droite)
+        # Placement sur l'axe X
         x0 = 0
         x1 = x0 + largeur_palier
         x2 = x1 + largeur_bras
@@ -120,35 +135,27 @@ class PageVilebrequin(tk.Frame):
         x6 = x5 + largeur_bras
         x7 = x6 + largeur_palier
 
-        # Centre du maneton (excentré de r)
         y = 1.0
 
-        # Paliers gauche/droite
+        # Palier gauche/droite
         ax.add_patch(mpatches.Rectangle((x0, y - d_p/2), largeur_palier, d_p, color="#b6cef2", label="Palier gauche"))
         ax.add_patch(mpatches.Rectangle((x6, y - d_p/2), largeur_palier, d_p, color="#b6cef2", label="Palier droit"))
-
         # Bras de manivelle
         ax.add_patch(mpatches.Rectangle((x1, y - d_p/2), largeur_bras, d_p, color="#aaaaaa", label="Bras"))
         ax.add_patch(mpatches.Rectangle((x5, y - d_p/2), largeur_bras, d_p, color="#aaaaaa"))
-
-        # Maneton (excentré en Y de +r)
+        # Maneton
         ax.add_patch(mpatches.Rectangle((x3, y + r - d_m/2), largeur_maneton, d_m, color="#ef767a", label="Maneton excentré"))
 
-        # Axe principal
         ax.plot([x0, x7], [y, y], color="k", lw=2, linestyle="--", zorder=3)
-
-        # Axe du maneton (excentré)
         x_centre_maneton = x3 + largeur_maneton / 2
         ax.plot([x_centre_maneton, x_centre_maneton], [y, y + r], color="#222", lw=2, linestyle="-")
         ax.plot([x3, x4], [y + r, y + r], color="#a33", lw=2, linestyle=":")
 
-        # Légendes
         ax.text(x1 + largeur_bras/2, y + d_p/2 + 3, "Bras de manivelle", ha="center", color="#555")
         ax.text(x3 + largeur_maneton/2, y + r + d_m/2 + 2, "Maneton (excentré)", ha="center", color="#a33")
         ax.text(x0 + largeur_palier/2, y + d_p/2 + 2, "Palier", ha="center", color="#334")
         ax.text(x6 + largeur_palier/2, y + d_p/2 + 2, "Palier", ha="center", color="#334")
 
-        # Ajuste la vue
         ax.set_xlim(x0 - 10, x7 + 10)
         ax.set_ylim(y - d_p, y + d_p * 2)
         ax.axis("off")

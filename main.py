@@ -2,7 +2,6 @@ import tkinter as tk
 from styles import COULEURS, bouton_flat  # widgets/couleurs personnalisés
 
 # --- Import des pages ---
-from pages.page_accueil import PageAccueil
 from pages.page_calculs import PageCalculs
 from pages.page_materiaux import PageMateriaux
 from pages.page_parametres import PageParametres
@@ -15,6 +14,8 @@ from pages.page_simulation_mission import PageSimulationMission
 from pages.page_boite_crabot import PageBoiteCrabot
 from pages.page_vilebrequin import PageVilebrequin
 from pages.page_dimensionnement_stirling import PageDimensionnementStirling
+from styles import COULEURS, bouton_flat
+from pages.page_accueil import PageAccueil
 
 # ----- Structure multi-pages -----
 class AssistantCAO(tk.Tk):

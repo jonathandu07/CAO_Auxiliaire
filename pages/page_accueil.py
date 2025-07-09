@@ -1,3 +1,4 @@
+#pages\page_accueil.py
 import tkinter as tk
 import os
 from PIL import Image, ImageTk
@@ -10,6 +11,19 @@ import math
 import pandas as pd
 import matplotlib.pyplot as plt
 from styles import COULEURS, bouton_flat
+from pages.page_calculs import PageCalculs
+from pages.page_materiaux import PageMateriaux
+from pages.page_parametres import PageParametres
+from pages.page_moteur_stirling import PageMoteurStirling
+from pages.page_piston_stirling import PagePistonStirling
+from pages.page_drone_structure import PageDroneStructure
+from pages.page_drone_propulsion import PageDronePropulsion
+from pages.page_drone_ia import PageDroneIA
+from pages.page_simulation_mission import PageSimulationMission
+from pages.page_boite_crabot import PageBoiteCrabot
+from pages.page_vilebrequin import PageVilebrequin
+from pages.page_dimensionnement_stirling import PageDimensionnementStirling
+
 
 class PageAccueil(tk.Frame):
     def __init__(self, parent, controller):
