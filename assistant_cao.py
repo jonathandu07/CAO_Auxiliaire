@@ -1,3 +1,15 @@
+import tkinter as tk
+import os
+from PIL import Image, ImageTk
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import numpy as np
+from mpl_toolkits.basemap import Basemap
+from materiaux import MATERIAUX
+import math
+import pandas as pd
+import matplotlib.pyplot as plt
+
 class AssistantCAO(tk.Tk):
     def __init__(self):
         super().__init__()
