@@ -3,7 +3,7 @@ import numpy as np
 from styles import COULEURS, bouton_flat
 from materiaux import MATERIAUX
 
-class PageVilebrequin(tk.Frame):
+class PageVilebrequinStirling(tk.Frame):
     def __init__(self, parent, controller):
         super().__init__(parent, bg=COULEURS["fond"])
         self.controller = controller

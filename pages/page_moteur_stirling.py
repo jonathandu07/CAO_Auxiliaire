@@ -1,3 +1,4 @@
+# pages\page_moteur_stirling.py
 import tkinter as tk
 from styles import COULEURS, bouton_flat
 from pages.page_piston_stirling import PagePistonStirling
@@ -9,6 +10,7 @@ from pages.page_bielle_stirling import PageBielleStirling
 from pages.page_volant_stirling import PageVolantStirling
 from pages.page_embase_stirling import PageEmbaseStirling
 from pages.page_visserie_stirling import PageVisserieStirling
+from pages.page_arbre_stirling import PageArbreStirling
 
 from pages.page_accueil import PageAccueil
 
@@ -80,6 +82,7 @@ class PageMoteurStirling(tk.Frame):
         bouton_flat(souspage_zone, "Détail Vilebrequin", lambda: self.goto_piece(PageVilebrequinStirling)).pack(pady=2, fill="x")
         bouton_flat(souspage_zone, "Détail Bielle", lambda: self.goto_piece(PageBielleStirling)).pack(pady=2, fill="x")
         bouton_flat(souspage_zone, "Détail Volant", lambda: self.goto_piece(PageVolantStirling)).pack(pady=2, fill="x")
+        bouton_flat(souspage_zone, "Détail Arbre principal", lambda: self.goto_piece(PageArbreStirling)).pack(pady=2, fill="x")  # <--- AJOUTÉ ICI !
         bouton_flat(souspage_zone, "Support / Embase", lambda: self.goto_piece(PageEmbaseStirling)).pack(pady=2, fill="x")
         bouton_flat(souspage_zone, "Visserie & Assemblage", lambda: self.goto_piece(PageVisserieStirling)).pack(pady=2, fill="x")
 

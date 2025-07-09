@@ -12,9 +12,8 @@ from pages.page_drone_propulsion import PageDronePropulsion
 from pages.page_drone_ia import PageDroneIA
 from pages.page_simulation_mission import PageSimulationMission
 from pages.page_boite_crabot import PageBoiteCrabot
-from pages.page_vilebrequin import PageVilebrequin
+from pages.page_vilebrequin_stirling import PageVilebrequinStirling  # <-- Correction ici !
 from pages.page_dimensionnement_stirling import PageDimensionnementStirling
-from styles import COULEURS, bouton_flat
 from pages.page_accueil import PageAccueil
 
 # ----- Structure multi-pages -----
@@ -46,7 +45,7 @@ class AssistantCAO(tk.Tk):
             PageDroneIA,
             PageSimulationMission,
             PageBoiteCrabot,
-            PageVilebrequin,
+            PageVilebrequinStirling,  # <-- Correction ici !
             PageDimensionnementStirling,
         ):
             frame = F(parent=container, controller=self)
